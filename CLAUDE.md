@@ -4,18 +4,25 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-This repository is **pre-implementation**. As of this writing it contains only documentation
-(`README.md`, `docs/collaboration_with_claude.md`), a `LICENSE`, and a Python `.gitignore`.
-There is no source code, package manifest, test suite, or build tooling yet. The sections below
-describe the intended domain and architecture so that decisions made early stay consistent with
-the project's long-term goals. **Update this file as the toolchain and structure are established.**
+The design is fully derisked and the **export/import flow is implemented** (spike). The package
+`src/anvil_data_qc/` provides: `config` (YAML + pydantic, tier resolution), `auth` (ADC per tier +
+identity guard), `logging_setup`, `clients/` (base + `tdr`, `azul`, `rawls`, `firecloud`),
+`bigquery`, `workspace` (naming), `pipeline` (the wired flow), and `cli` (Typer). The pipeline runs
+TDR → BigQuery `dataset_id` → Azul manifest → Rawls `createWorkspace` → Firecloud `importJob`.
 
-Tracked project risks live in [`docs/risk_register.md`](docs/risk_register.md) — review and update it
-as risks are mitigated or retired (notably after the first export/import spike).
+**Status of the implementation:**
+- ✅ Unit tests pass (`pytest`, mocked HTTP) and `ruff` is clean.
+- ⏳ **Not yet run end-to-end** — that needs real per-tier ADC creds + a real snapshot and creates a
+  real retained workspace (run against **dev** first). Two parts are **inferred** (no capture existed)
+  and flagged in the code to confirm on the first run: the **TDR `retrieveSnapshot`** response shape,
+  and the **`importJob`** job-id field + status values.
+- ⏭️ **Next layer (not built):** the QC verifications — auth-domain match and the AW-vs-snapshot table
+  comparison (with the `sources/`/`compare/` seams).
 
-The environment is Python **3.10.12** (pyenv) with a local `.venv` (no dependencies installed yet).
-No `pyproject.toml`/`requirements.txt` exists — when adding one, prefer committing a lockfile for
-reproducibility (this is a deployable application, not a library).
+Environment: Python **3.13.14** (pyenv; pinned in `.python-version`), local `.venv`, deps from
+`pyproject.toml` with pinned `requirements.txt` / `requirements-dev.txt` (pip-tools). See the README
+for developer setup, and [`docs/risk_register.md`](docs/risk_register.md) for tracked risks (review
+after the first dev-tier run).
 
 ## What this project does
 
