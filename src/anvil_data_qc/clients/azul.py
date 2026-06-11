@@ -13,8 +13,7 @@ from __future__ import annotations
 import json
 import logging
 import time
-
-from google.auth.credentials import Credentials
+from collections.abc import Callable
 
 from ..logging_setup import LOGGER_NAME
 from .base import BaseClient
@@ -25,8 +24,14 @@ PFB_FORMAT = "verbatim.pfb"
 
 
 class AzulClient(BaseClient):
-    def __init__(self, base_url: str, credentials: Credentials, catalog: str | None = None, timeout: int = 60) -> None:
-        super().__init__(base_url, credentials, timeout)
+    def __init__(
+        self,
+        base_url: str,
+        token_provider: Callable[[], str],
+        catalog: str | None = None,
+        timeout: int = 60,
+    ) -> None:
+        super().__init__(base_url, token_provider, timeout)
         self._catalog = catalog
 
     def default_catalog(self) -> str:

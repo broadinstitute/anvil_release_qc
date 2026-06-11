@@ -10,6 +10,11 @@ automation mirrors. Endpoints and per-tier URLs: [`services.md`](services.md).
 > never as inputs. If the downstream index (Azul) disagrees with the snapshot, that is a *finding*,
 > not something to work around.
 
+> **Validation status (2026-06-11):** the full flow has been run end-to-end against the **dev** tier
+> for an **open-access** snapshot — TDR → BigQuery → Azul (anonymous) → `createWorkspace` →
+> `importJob` → `Done`. The **controlled-access** path depends on resolving Azul auth (see
+> [Authentication](#authentication)).
+
 ## Identifiers (worked example from the capture)
 
 | Identifier | Example value | Source of truth |
@@ -35,6 +40,29 @@ Ways to identify whether a dataset/snapshot is open- or controlled-access:
 - Additionally, **controlled-access** snapshots have an **Authorization Domain** set; **open-access**
   snapshots do not.
 
+## Authentication
+
+Two **distinct** credentials are needed — a single token does *not* satisfy every service:
+
+- **TDR, BigQuery, and Terra (Rawls, Firecloud)** accept the **Google ADC token** (a plain
+  `gcloud auth application-default` user token). Validated against dev.
+- **Azul does NOT accept the gcloud ADC token.** Its registered-user validation
+  (`TerraClient.for_registered_user(...).validate()`, in `src/azul/terra.py` + `oauth2.py`) requires a
+  Google access token whose **`azp` (authorized party) equals Azul's own OAuth client id** (dev:
+  `561542988117-…apps.googleusercontent.com`). Consequences:
+  - **Open-access** datasets need **no token** — Azul serves them via its public service account, so
+    the tool sends *no* `Authorization` header to Azul when no APAT is configured. ✅ validated.
+  - **Controlled-access** datasets need an Azul-accepted token. The gcloud ADC token (`azp` = gcloud)
+    is rejected (401), and an **APAT** from Azul's `GET /user/token` is *also* rejected by the
+    registered-user validation (401 "Invalid credentials"; the APAT had `jti:0`). **Open question with
+    the Azul team:** how should a *headless/batch* client obtain an Azul-accepted user token? (The
+    interactive flow uses an authorization-code token with the right `azp`, issued BFF-style with no
+    refresh token — awkward for batch, which is why the long-lived APAT looked promising.)
+
+The tool models this with a per-tier optional **APAT** (`azul_apat_file`): when set, it is sent to
+Azul; when unset/empty, Azul is called anonymously (open-access). The gcloud ADC token continues to
+serve TDR/BigQuery/Terra.
+
 ## Flow
 
 ### 1. Resolve the Azul `dataset_id` from the snapshot (system of record)
@@ -55,8 +83,12 @@ Ways to identify whether a dataset/snapshot is open- or controlled-access:
   `Retry-After`), until `Status == 302`. The 302 `Location` is a **signed S3 URL** to the `.avro`
   PFB manifest. (The 302 body also includes a `CommandLine` with ready-made `curl` commands.)
 - `format=verbatim.pfb` — "verbatim" mirrors the source, which is what QC wants.
-- `<catalog>` was `anvil14` in this capture; it is **versioned and will change** — discover/
-  parameterize it rather than hardcoding.
+- **Catalog (the data release):** a catalog is the indexed data for one AnVIL release. **Dev**
+  defaults to catalog `anvil` (omit the param). **Prod** requires the *new release's* catalog
+  explicitly (e.g. `catalog=anvil14`) — that release is being QC'd before it becomes the default, so
+  do not rely on the prod default. The tool exposes `--catalog` (omit in dev; set in prod).
+- **Auth:** see [Authentication](#authentication). Open-access works anonymously; controlled-access
+  needs an Azul-accepted token.
 
 ### 3. Hand off to Terra
 The interactive UI opens Terra at `https://<terra>/#import-data?format=PFB&url=<signed S3 PFB URL>`
@@ -72,14 +104,18 @@ straight to the API calls below using the signed URL from §2.
   ```
   → `201`. **`authorizationDomain` is intentionally `[]`** — see §6.
 
-### 5. Import the PFB (Firecloud Orchestration — asynchronous)
+### 5. Import the PFB (Firecloud Orchestration — asynchronous, long-running)
 - **POST** `https://<firecloud>/api/workspaces/<namespace>/<name>/importJob`
   ```json
   {"url": "<signed S3 PFB URL>", "filetype": "pfb", "options": null}
   ```
-  → `202`, returns a job id.
-- **Poll** `GET https://<firecloud>/api/workspaces/<namespace>/<name>/importJob/<jobId>` until the
-  job reaches a **terminal** state, and require **success** before any QC.
+  → `202` with `{"jobId": "<uuid>", "url": "<signed url>"}`. (The submit can be slow on dev — allow a
+  generous client timeout.)
+- **Poll** `GET https://<firecloud>/api/workspaces/<namespace>/<name>/importJob/<jobId>` →
+  `{"filetype": "DATA_IMPORT", "jobId": "<uuid>", "status": "<status>"}`. Status lifecycle:
+  `Pending → Translating → ReadyForUpsert → Upserting → Done` (success), or `Error` (failure).
+  **Imports can run ~1 hour or more**, so poll patiently (the tool uses a generous `max_wait`).
+  Require `Done` before any QC. *(There is also `GET …/importJob?running_only=true` to list jobs.)*
 
 ### 6. Authorization domain — applied automatically, then verified
 The workspace is created with `authorizationDomain: []`. **The import service then sets the auth
@@ -108,8 +144,9 @@ apply it. **Do not fetch or set the auth domain ourselves.**
 
 ## Notes
 
-- **Auth:** every Azul and Terra call uses a Google **bearer token** (`Authorization: Bearer …`);
-  one token per tier satisfies both. (Terra calls also send an `x-app-id` header.)
+- **Auth:** see [Authentication](#authentication) — TDR/BigQuery/Terra use the gcloud ADC token; Azul
+  needs its own (open-access = anonymous; controlled-access = unresolved). `Authorization` is always
+  logged redacted; Terra calls also send an `x-app-id` header.
 - **BigQuery is a core dependency**, needed in §1 (dataset_id resolution) — not only the comparison
   phase.
 - The PFB manifest is an **Avro** file served from **S3** via an AWS presigned URL (temporary STS

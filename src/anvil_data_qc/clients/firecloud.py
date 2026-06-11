@@ -6,8 +6,8 @@ See docs/export_import_flow.md section 5.
   POST /api/workspaces/<ns>/<name>/importJob   {"url": <signed S3 URL>, "filetype": "pfb", "options": null}  -> 202
   GET  /api/workspaces/<ns>/<name>/importJob/<jobId>  (poll) -> terminal status
 
-NOTE: the capture did not include the importJob response bodies, so the job-id field and status
-values below are based on the Terra import-service API and must be confirmed on the first dev run.
+Confirmed against a real dev import (2026-06-11): submit returns ``{"jobId", "url"}``; the status
+endpoint returns ``{"filetype", "jobId", "status"}`` (see the status constants below).
 """
 
 from __future__ import annotations
@@ -20,10 +20,10 @@ from .base import BaseClient
 
 logger = logging.getLogger(LOGGER_NAME)
 
-# Inferred -- confirm against a real importJob response on the first dev-tier run.
-JOB_ID_FIELDS = ("jobId", "id")
+JOB_ID_FIELDS = ("jobId", "id")  # the submit response uses "jobId"
 SUCCESS_STATUS = "Done"
-TERMINAL_STATUSES = frozenset({"Done", "Error", "Cancelled"})
+FAILURE_STATUSES = frozenset({"Error"})
+# In-progress statuses keep polling: Pending, Translating, ReadyForUpsert, Upserting (+ any unknown).
 
 
 class FirecloudClient(BaseClient):
@@ -34,28 +34,30 @@ class FirecloudClient(BaseClient):
         ).json()
 
     def get_import_job(self, namespace: str, name: str, job_id: str) -> dict:
-        return self.request(
-            "GET", f"/api/workspaces/{namespace}/{name}/importJob/{job_id}"
-        ).json()
+        return self.request("GET", f"/api/workspaces/{namespace}/{name}/importJob/{job_id}").json()
 
     def wait_for_import(
         self,
         namespace: str,
         name: str,
         job_id: str,
-        poll_interval: float = 15.0,
-        max_wait: float = 3600.0,
+        poll_interval: float = 30.0,
+        max_wait: float = 7200.0,
     ) -> dict:
-        """Poll until the import job reaches a terminal state; raise unless it succeeded."""
+        """Poll until the import job succeeds ('Done'); raise on failure ('Error') or timeout.
+
+        PFB imports can run a long time (~1 hour, sometimes more), hence the generous ``max_wait``.
+        Any non-terminal status (Pending/Translating/ReadyForUpsert/Upserting/unknown) keeps polling.
+        """
         deadline = time.monotonic() + max_wait
         while True:
             job = self.get_import_job(namespace, name, job_id)
             status = job.get("status")
             logger.info("Import job %s: status=%s", job_id, status)
-            if status in TERMINAL_STATUSES:
-                if status != SUCCESS_STATUS:
-                    raise RuntimeError(f"Import job {job_id} ended with status '{status}': {job}")
+            if status == SUCCESS_STATUS:
                 return job
+            if status in FAILURE_STATUSES:
+                raise RuntimeError(f"Import job {job_id} failed with status '{status}': {job}")
             if time.monotonic() > deadline:
                 raise TimeoutError(f"Import job {job_id} did not finish within {max_wait}s.")
             time.sleep(poll_interval)

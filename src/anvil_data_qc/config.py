@@ -42,6 +42,8 @@ class TierConfig(BaseModel):
     # None -> use the ambient ADC identity (e.g. a Terra workflow's runtime service account).
     adc_credentials_file: Optional[str] = None
     billing_project: str
+    # File holding the Azul personal access token (APAT) for this tier (gitignored secret).
+    azul_apat_file: Optional[str] = None
 
 
 class AppConfig(BaseModel):
@@ -56,6 +58,7 @@ class ResolvedTier(BaseModel):
     email: str
     adc_credentials_file: Optional[str]
     billing_project: str
+    azul_apat_file: Optional[str]
     service_urls: dict[str, str]
 
     def url(self, service: str) -> str:
@@ -83,5 +86,6 @@ def resolve_tier(config: AppConfig, tier_name: Optional[str] = None) -> Resolved
         email=tc.email,
         adc_credentials_file=tc.adc_credentials_file,
         billing_project=tc.billing_project,
+        azul_apat_file=tc.azul_apat_file,
         service_urls=SERVICE_URLS[name],
     )

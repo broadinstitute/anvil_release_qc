@@ -10,12 +10,13 @@ of R2) is retired by *doing* rather than planning.
 
 | ID | Risk | Severity | Status |
 |----|------|----------|--------|
-| R1 | Export/import mechanics assumed, not verified | High | Largely retired — flow verified from 2026-06-10 capture; spike remains |
+| R1 | Export/import mechanics assumed, not verified | High | **Retired (open-access)** — full flow validated end-to-end on dev incl. import→Done |
 | R2 | Controlled-access correctness (auth domain; dev/prod parity) | High (compliance) | Model resolved — import auto-applies; QC verifies post-import |
 | R3 | Comparison fidelity: expected vs. unexpected differences | High | Deferred (by design) |
 | R4 | Batch-scale robustness & retained-workspace cost/quota | Medium | Watching |
 | R5 | Multi-org API drift / reverse-engineered UI flow | Medium (rising over time) | Mitigating |
 | R6 | Premature generalization in our own design | Medium | Watching |
+| R7 | Azul controlled-access auth for headless/batch | High (blocks most datasets in batch) | **Open** — gcloud + APAT both rejected; with Azul team |
 
 ---
 
@@ -30,7 +31,12 @@ one real snapshot before polishing.
 [`export_import_flow.md`](export_import_flow.md): Azul `PUT …/manifest/files?…&format=verbatim.pfb`
 (async 301→302 → signed S3 URL); Terra `createWorkspace` → `importJob {url, filetype:"pfb"}` (async).
 Residual risk is implementation + a few parameterizations (e.g. the versioned Azul `catalog`).
-**Revisit:** Immediately after the first HAR capture and again after the first successful spike run.
+**Update (2026-06-11):** Full flow **run end-to-end against dev for an open-access snapshot** — TDR →
+BigQuery (`anvil_dataset.dataset_id`) → Azul manifest (anonymous) → `createWorkspace` (201) →
+`importJob` polled to `Done`. importJob shapes confirmed (`jobId`; status lifecycle
+Pending→…→ReadyForUpsert→Upserting→Done/Error). **Open-access path retired**; the remaining gap is
+controlled-access Azul authentication — see **R7**.
+**Revisit:** When R7 (controlled-access auth) is resolved; otherwise retired for the open-access path.
 
 ### R2 — Controlled-access correctness (auth domain; dev/prod parity)
 **Impact:** Workspaces hold controlled-access tabular metadata that must be protected by an auth
@@ -82,3 +88,15 @@ reality. Related: logic drifting into notebooks instead of the package.
 **Mitigation:** Implement AW-vs-snapshot concretely first; let the interface emerge from one working
 case, then generalize. Keep notebooks thin (import the package; no logic).
 **Revisit:** Continuously during implementation; before committing shared interfaces.
+
+### R7 — Azul authentication for controlled-access (headless/batch)
+**Impact:** Most AnVIL datasets are controlled-access and the primary use is batch — but Azul's
+registered-user validation requires a Google access token whose `azp` equals Azul's own OAuth client
+id. The gcloud ADC token (`azp` = gcloud) is rejected (401), and an APAT from `GET /user/token` is
+*also* rejected ("Invalid credentials"; `jti:0`). The interactive flow uses an authorization-code
+token (correct `azp`) issued BFF-style with **no refresh token** — awkward for headless/batch. So
+controlled-access export is currently **blocked** for automation; open-access (anonymous) is fine.
+**Mitigation / next:** Azul-team question — how should a headless/batch client obtain an Azul-accepted
+user token (is the APAT meant to be exchanged for an access token; is there a service-account path; is
+APAT support complete in dev)? See [`export_import_flow.md`](export_import_flow.md) → Authentication.
+**Revisit:** When the Azul team responds; before any controlled-access run.

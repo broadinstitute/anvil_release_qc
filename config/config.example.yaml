@@ -19,8 +19,12 @@ tiers:
     adc_credentials_file: ~/.config/anvil-data-qc/adc-dev.json
     # Terra billing project = the workspace namespace for created workspaces.
     billing_project: your-dev-billing-project
+    # Azul personal access token (APAT) file (gitignored). Obtain via Azul's GET /user/token;
+    # Azul accepts this where it rejects a plain gcloud ADC token.
+    azul_apat_file: secrets/azul-apat-dev.txt
 
   prod:
     email: you@example.org
     adc_credentials_file: ~/.config/anvil-data-qc/adc-prod.json
     billing_project: your-prod-billing-project
+    azul_apat_file: secrets/azul-apat-prod.txt

@@ -225,6 +225,9 @@ tmp/
 # Per-developer config (emails, ADC paths, billing projects) — never commit.
 config/config.yaml
 
+# Local secrets: Azul personal access tokens (APATs), etc. — never commit.
+secrets/
+
 # Run logs.
 logs/
 

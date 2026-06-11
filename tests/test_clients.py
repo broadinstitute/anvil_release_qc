@@ -18,13 +18,32 @@ class _Resp:
 
 # --- Azul manifest poll ---
 
+
 def test_azul_request_pfb_manifest_polls_to_signed_url(monkeypatch):
-    client = AzulClient("https://azul.example", credentials=None, catalog="anvil14")
+    client = AzulClient("https://azul.example", lambda: "token", catalog="anvil14")
     responses = iter(
         [
-            _Resp({"Status": 301, "Location": "https://azul.example/fetch/manifest/files/t1", "Retry-After": 0}),
-            _Resp({"Status": 301, "Location": "https://azul.example/fetch/manifest/files/t2", "Retry-After": 0}),
-            _Resp({"Status": 302, "Location": "https://s3.example/m.avro?X-Amz-Signature=zzz", "Retry-After": 0}),
+            _Resp(
+                {
+                    "Status": 301,
+                    "Location": "https://azul.example/fetch/manifest/files/t1",
+                    "Retry-After": 0,
+                }
+            ),
+            _Resp(
+                {
+                    "Status": 301,
+                    "Location": "https://azul.example/fetch/manifest/files/t2",
+                    "Retry-After": 0,
+                }
+            ),
+            _Resp(
+                {
+                    "Status": 302,
+                    "Location": "https://s3.example/m.avro?X-Amz-Signature=zzz",
+                    "Retry-After": 0,
+                }
+            ),
         ]
     )
     calls = []
@@ -48,7 +67,7 @@ def test_azul_request_pfb_manifest_polls_to_signed_url(monkeypatch):
 
 
 def test_azul_poll_raises_on_unexpected_status(monkeypatch):
-    client = AzulClient("https://azul.example", credentials=None, catalog="anvil14")
+    client = AzulClient("https://azul.example", lambda: "token", catalog="anvil14")
     monkeypatch.setattr(client, "request", lambda *a, **k: _Resp({"Status": 500}))
     monkeypatch.setattr("anvil_data_qc.clients.azul.time.sleep", lambda _s: None)
     with pytest.raises(RuntimeError):
@@ -57,9 +76,10 @@ def test_azul_poll_raises_on_unexpected_status(monkeypatch):
 
 # --- Firecloud import job ---
 
+
 def test_wait_for_import_succeeds(monkeypatch):
-    client = FirecloudClient("https://fc.example", credentials=None)
-    statuses = iter([{"status": "Running"}, {"status": "Done"}])
+    client = FirecloudClient("https://fc.example", lambda: "token")
+    statuses = iter([{"status": "ReadyForUpsert"}, {"status": "Upserting"}, {"status": "Done"}])
     monkeypatch.setattr(client, "get_import_job", lambda ns, n, jid: next(statuses))
     monkeypatch.setattr("anvil_data_qc.clients.firecloud.time.sleep", lambda _s: None)
     job = client.wait_for_import("ns", "ws", "job-1", poll_interval=0)
@@ -67,7 +87,7 @@ def test_wait_for_import_succeeds(monkeypatch):
 
 
 def test_wait_for_import_raises_on_error(monkeypatch):
-    client = FirecloudClient("https://fc.example", credentials=None)
+    client = FirecloudClient("https://fc.example", lambda: "token")
     monkeypatch.setattr(client, "get_import_job", lambda ns, n, jid: {"status": "Error"})
     monkeypatch.setattr("anvil_data_qc.clients.firecloud.time.sleep", lambda _s: None)
     with pytest.raises(RuntimeError):
@@ -83,10 +103,13 @@ def test_import_job_id():
 
 # --- TDR + Rawls extraction helpers ---
 
+
 def test_tdr_snapshot_extraction():
     snap = {
         "name": "ANVIL_CCDG_x",
-        "accessInformation": {"bigQuery": {"projectId": "datarepo-183d3f73", "datasetName": "anvil_x"}},
+        "accessInformation": {
+            "bigQuery": {"projectId": "datarepo-183d3f73", "datasetName": "anvil_x"}
+        },
     }
     assert snapshot_name(snap) == "ANVIL_CCDG_x"
     assert snapshot_bigquery_access(snap) == ("datarepo-183d3f73", "anvil_x")

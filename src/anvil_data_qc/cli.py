@@ -1,6 +1,6 @@
 """Command-line entrypoint (Typer).
 
-    anvil-data-qc qc --snapshot-id <tdr-snapshot-id> [--tier dev|prod] [--config path]
+anvil-data-qc qc --snapshot-id <tdr-snapshot-id> [--tier dev|prod] [--config path]
 """
 
 from __future__ import annotations
@@ -29,14 +29,33 @@ def qc(
         ..., "--snapshot-id", "-s", help="TDR snapshot id (the input / system of record)."
     ),
     tier: Optional[str] = typer.Option(
-        None, "--tier", "-t", help="Tier to run against (dev|prod). Defaults to the config's default_tier."
+        None,
+        "--tier",
+        "-t",
+        help="Tier to run against (dev|prod). Defaults to the config's default_tier.",
     ),
     config: Path = typer.Option(
         Path("config/config.yaml"), "--config", "-c", help="Path to the YAML config file."
     ),
+    catalog: Optional[str] = typer.Option(
+        None,
+        "--catalog",
+        help="Azul catalog (the data release). Omit in dev (uses the default); set in prod, e.g. --catalog anvil14.",
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Validate the export side only (TDR -> BigQuery -> Azul); create no workspace, run no import.",
+    ),
 ) -> None:
     """Run the export/import + QC flow for one TDR snapshot."""
-    run_qc(snapshot_id=snapshot_id, tier_name=tier, config_path=config)
+    run_qc(
+        snapshot_id=snapshot_id,
+        tier_name=tier,
+        config_path=config,
+        dry_run=dry_run,
+        catalog=catalog,
+    )
 
 
 if __name__ == "__main__":
