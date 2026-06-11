@@ -1,0 +1,35 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "anvil-data-qc"
+version = "0.1.0"
+description = "Processes and tools for AnVIL Data Release quality control"
+readme = "README.md"
+requires-python = ">=3.13"
+license = { file = "LICENSE" }
+dependencies = [
+    "typer>=0.12",
+    "pyyaml>=6",
+    "pydantic>=2",
+    "requests>=2.31",
+    "google-auth>=2.30",
+    "google-cloud-bigquery>=3.20",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.5", "pip-tools>=7"]
+
+[project.scripts]
+anvil-data-qc = "anvil_data_qc.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py313"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,6 @@
+# git-secrets allowances, shared via the repo (read automatically by git-secrets).
+#
+# scripts/setup-git-secrets.sh *defines* the secret-scanning patterns; those definition lines are
+# not secrets, but some (e.g. the private-key pattern) match their own definition. Exempt any line
+# that registers a pattern. Every such line contains "secrets.patterns", which no real secret would.
+secrets\.patterns
