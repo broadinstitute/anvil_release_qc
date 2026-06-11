@@ -136,8 +136,11 @@ flow itself is specified in [`docs/export_import_flow.md`](docs/export_import_fl
 per-developer `config.yaml`.
 
 **Workspace creation:** one **retained** workspace **per run**. Name =
-`<user-local-part>_anvil_azul_<sanitized full snapshot name>_YYYYMMDDHHMM` (run start time,
-**minute-granular**), sanitizing any non-`[A-Za-z0-9_-]` run to a single `_`. Minute granularity
+`<user-local-part>_qc_anvil_ade_<sanitized full snapshot name>_YYYYMMDDHHMM` (run start time,
+**minute-granular**), sanitizing any non-`[A-Za-z0-9_-]` run to a single `_`. The leading `qc`
+segment makes these workspaces easy to identify/group/delete (they accumulate — R4); `ade` (AnVIL
+Data Explorer, the public name) is used over the backend service name `azul`. The infix may evolve;
+`workspace._NAME_INFIX` is the single change point. Minute granularity
 (not per-day) is for the **batch** use case (the primary one): a QC workflow that fails transiently
 can be **rerun without colliding** on an existing workspace — Terra workflows take minutes to start,
 so minute resolution suffices. **Fail fast** if the name already exists (now a rare same-minute edge).

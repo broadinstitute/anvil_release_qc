@@ -20,7 +20,7 @@ def test_workspace_name_format():
         when=when,
     )
     assert name == (
-        "sa-mbaumann_anvil_azul_"
+        "sa-mbaumann_qc_anvil_ade_"
         "ANVIL_CCDG_Broad_AI_IBD_Kugathasan_WGS_20240113_ANV5_202409261935_202606101431"
     )
 
