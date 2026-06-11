@@ -18,6 +18,11 @@ app = typer.Typer(
 )
 
 
+@app.callback()
+def main() -> None:
+    """AnVIL Data Release QC commands."""
+
+
 @app.command()
 def qc(
     snapshot_id: str = typer.Option(
