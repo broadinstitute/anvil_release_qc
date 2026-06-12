@@ -44,24 +44,36 @@ Ways to identify whether a dataset/snapshot is open- or controlled-access:
 
 Two **distinct** credentials are needed — a single token does *not* satisfy every service:
 
-- **TDR, BigQuery, and Terra (Rawls, Firecloud)** accept the **Google ADC token** (a plain
-  `gcloud auth application-default` user token). Validated against dev.
-- **Azul does NOT accept the gcloud ADC token.** Its registered-user validation
-  (`TerraClient.for_registered_user(...).validate()`, in `src/azul/terra.py` + `oauth2.py`) requires a
-  Google access token whose **`azp` (authorized party) equals Azul's own OAuth client id** (dev:
-  `561542988117-…apps.googleusercontent.com`). Consequences:
-  - **Open-access** datasets need **no token** — Azul serves them via its public service account, so
-    the tool sends *no* `Authorization` header to Azul when no APAT is configured. ✅ validated.
-  - **Controlled-access** datasets need an Azul-accepted token. The gcloud ADC token (`azp` = gcloud)
-    is rejected (401), and an **APAT** from Azul's `GET /user/token` is *also* rejected by the
-    registered-user validation (401 "Invalid credentials"; the APAT had `jti:0`). **Open question with
-    the Azul team:** how should a *headless/batch* client obtain an Azul-accepted user token? (The
-    interactive flow uses an authorization-code token with the right `azp`, issued BFF-style with no
-    refresh token — awkward for batch, which is why the long-lived APAT looked promising.)
+- **TDR, BigQuery, and Terra (Rawls, Firecloud)** use the **gcloud ADC token** (a plain
+  `gcloud auth application-default` user token). It is **refreshable** (`google-auth` mints a fresh
+  access token when the current one expires), so the long import phase survives the ~1 h boundary.
+  Validated against dev.
+- **Azul needs its own token.** Its registered-user validation (`CredentialedClient.validate` in
+  `DataBiosphere/azul` `src/azul/oauth2.py`) accepts a user access token only if its
+  **`azp` (authorized party) equals Azul's own OAuth client id** (dev:
+  `561542988117-…apps.googleusercontent.com`). So:
+  - The **gcloud ADC token is rejected** (`azp` = gcloud).
+  - The Azul **PAT (APAT)** is rejected for controlled-access **by design** — the Azul team scoped it
+    to Azul's *index* content and disallowed reaching controlled-access TDR data. We do not use it.
+  - **Open-access** datasets need **no token** — Azul serves them anonymously (public service
+    account), so the tool sends *no* `Authorization` header when no token is configured. ✅ validated.
+  - **Controlled-access** datasets need an **interactive Google access token** (`azp` = Azul's
+    client). Azul's client is confidential (its secret lives only in Azul's backend), so we **cannot
+    mint** this token ourselves — it is obtained by a browser login. It is short-lived (~1 h) and
+    **non-refreshable**, but is used only in the **short** Azul phase (minutes); the long import phase
+    rides the refreshable gcloud token.
 
-The tool models this with a per-tier optional **APAT** (`azul_apat_file`): when set, it is sent to
-Azul; when unset/empty, Azul is called anonymously (open-access). The gcloud ADC token continues to
-serve TDR/BigQuery/Terra.
+**`azul-login` helper + pre-run gate.** `anvil-data-qc azul-login --tier <t>` opens the Azul Swagger
+UI, you sign in and copy the token, and it is validated via Google `tokeninfo` (**the same check Azul
+runs** — `azp`, account email, expiry) and written to the tier's `azul_token_file`. Before each run
+the pipeline re-validates that token and **fails fast** if it is wrong-client / wrong-account / near
+expiry (telling you to re-run `azul-login`). The expected `azp` comes from `azul_oauth2_client_id` or
+is auto-discovered from Azul's served `swagger-initializer.js` (so prod's id need not be hardcoded).
+One login (~hourly) covers a large batch, since one token can launch many concurrent pipelines.
+
+**Future (security-neutral) option:** ask Azul to accept a native/installed OAuth client for CLI
+login (PKCE + loopback, no secret) — an unattended login without weakening controlled-access
+protection. Tracked as risk **R7**.
 
 ## Flow
 

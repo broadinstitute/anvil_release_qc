@@ -22,9 +22,9 @@ logger = logging.getLogger(LOGGER_NAME)
 class BaseClient:
     """A thin wrapper over ``requests`` that injects a bearer token and logs every call.
 
-    ``token_provider`` is a callable returning the bearer token string -- a Google access token for
-    most services, or the Azul personal access token (APAT) for Azul. The client is agnostic to where
-    the token comes from.
+    ``token_provider`` is a callable returning the bearer token string -- the gcloud ADC token for
+    most services, or the Azul access token for Azul (or ``None`` for anonymous/open-access Azul).
+    The client is agnostic to where the token comes from.
     """
 
     def __init__(self, base_url: str, token_provider: Callable[[], str], timeout: int = 60) -> None:

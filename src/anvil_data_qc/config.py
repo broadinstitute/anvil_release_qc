@@ -42,8 +42,11 @@ class TierConfig(BaseModel):
     # None -> use the ambient ADC identity (e.g. a Terra workflow's runtime service account).
     adc_credentials_file: Optional[str] = None
     billing_project: str
-    # File holding the Azul personal access token (APAT) for this tier (gitignored secret).
-    azul_apat_file: Optional[str] = None
+    # File holding this tier's Azul access token (gitignored secret); populated by `azul-login`.
+    azul_token_file: Optional[str] = None
+    # The Azul OAuth client id a token must carry as `azp`. Optional: auto-discovered from Azul's
+    # served Swagger initializer when unset (so prod's id need not be hardcoded).
+    azul_oauth2_client_id: Optional[str] = None
 
 
 class AppConfig(BaseModel):
@@ -58,7 +61,8 @@ class ResolvedTier(BaseModel):
     email: str
     adc_credentials_file: Optional[str]
     billing_project: str
-    azul_apat_file: Optional[str]
+    azul_token_file: Optional[str]
+    azul_oauth2_client_id: Optional[str] = None
     service_urls: dict[str, str]
 
     def url(self, service: str) -> str:
@@ -86,6 +90,7 @@ def resolve_tier(config: AppConfig, tier_name: Optional[str] = None) -> Resolved
         email=tc.email,
         adc_credentials_file=tc.adc_credentials_file,
         billing_project=tc.billing_project,
-        azul_apat_file=tc.azul_apat_file,
+        azul_token_file=tc.azul_token_file,
+        azul_oauth2_client_id=tc.azul_oauth2_client_id,
         service_urls=SERVICE_URLS[name],
     )

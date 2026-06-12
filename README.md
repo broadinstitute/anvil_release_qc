@@ -31,6 +31,46 @@ python scripts/scrub_har.py <capture>.har    # writes <capture>.scrubbed.har
 
 Raw captures belong under `tmp/` (gitignored) and must never be committed.
 
+## Configuration & running
+
+The flow is **not yet validated end-to-end for controlled-access** (see the risk register and the
+limitations in the flow doc). These are the steps the tooling supports today.
+
+1. **Config.** Copy the template and fill in your per-tier values (gitignored):
+
+   ```bash
+   cp config/config.example.yaml config/config.yaml
+   ```
+
+   Each tier needs `{email, adc_credentials_file, billing_project, azul_token_file}`.
+
+2. **Google sign-in** (serves TDR, BigQuery, and Terra). A plain ADC login per tier; the active
+   account must match that tier's configured `email` (enforced at runtime):
+
+   ```bash
+   gcloud auth application-default login
+   ```
+
+3. **Azul sign-in** (for controlled-access datasets). Azul needs a token issued to *its own* OAuth
+   client — a gcloud token is rejected. Capture one interactively: this opens the Azul Swagger UI, you
+   sign in and copy the token, and it is validated (`azp`, account, expiry) and stored for the tier.
+
+   ```bash
+   anvil-data-qc azul-login --tier dev
+   ```
+
+   Re-run when it expires (~1 h). Open-access datasets need no Azul token (Azul is called anonymously).
+
+4. **Run QC** for one TDR snapshot:
+
+   ```bash
+   anvil-data-qc qc --snapshot-id <tdr-snapshot-id> --tier dev
+   # add --dry-run to validate the export side only (no workspace created, no import run)
+   ```
+
+See [`docs/export_import_flow.md`](docs/export_import_flow.md) → Authentication for why two tokens are
+needed and how `azul-login` works.
+
 ## Documentation
 
 - [`CLAUDE.md`](CLAUDE.md) — architecture, design decisions, and conventions.

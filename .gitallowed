@@ -5,11 +5,7 @@
 # that registers a pattern. Every such line contains "secrets.patterns", which no real secret would.
 secrets\.patterns
 
-# Fabricated, non-secret test fixtures (tests/test_auth.py, tests/test_redaction.py): synthetic
-# JWT / APAT / access-token / AWS-key shapes used to exercise token validation and log redaction.
-# These are not real credentials.
-eyJraw\.token\.value
-eyJjson\.token\.value
-ya29\.this-is-an-access-token-not-a-jwt
+# Fabricated, non-secret test fixtures (tests/test_redaction.py): synthetic AWS-key / JWT shapes
+# used to exercise log redaction. These are not real credentials.
 ASIAUHATKQ7OVN5RMSE6
 eyJhbGciOiJFUzI1NiJ9\.eyJzdWIiOiJ4In0\.c2lnbmF0dXJlX3ZhbHVl

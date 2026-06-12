@@ -18,7 +18,13 @@ from typing import Optional
 from urllib.parse import urlsplit
 
 from . import __version__
-from .auth import assert_tier_identity, bearer_token, credentials_for_tier, read_azul_apat
+from .auth import assert_tier_identity, bearer_token, credentials_for_tier
+from .azul_auth import (
+    MIN_TOKEN_SECONDS_FOR_RUN,
+    expected_client_id,
+    read_azul_token,
+    validate_azul_token,
+)
 from .bigquery import resolve_dataset_id
 from .clients.azul import AzulClient
 from .clients.firecloud import FirecloudClient, import_job_id
@@ -63,6 +69,28 @@ def run_qc(
     def google_token() -> str:
         return bearer_token(creds)
 
+    # Azul token: read + validate up front (fail fast before any TDR/BigQuery work). Azul rejects
+    # gcloud ADC tokens, so it needs its own interactive access token (see `azul-login`). With no
+    # token configured, Azul is called anonymously -- open-access datasets only.
+    azul_token = read_azul_token(tier)
+    if azul_token is None:
+        logger.info(
+            "No Azul token configured (azul_token_file unset/empty); calling Azul without a token "
+            "(open-access only). Run `anvil-data-qc azul-login` for controlled-access datasets."
+        )
+    else:
+        info = validate_azul_token(
+            azul_token,
+            expected_azp=expected_client_id(tier),
+            expected_email=tier.email,
+            min_remaining_seconds=MIN_TOKEN_SECONDS_FOR_RUN,
+        )
+        logger.info(
+            "Azul token OK: account %s, azp matches, expires in %ss.",
+            info.get("email"),
+            info.get("expires_in"),
+        )
+
     # 1. TDR: retrieve the snapshot (name + BigQuery access info).
     tdr = TdrClient(tier.url("tdr"), google_token)
     snapshot = tdr.retrieve_snapshot(snapshot_id)
@@ -73,16 +101,8 @@ def run_qc(
     # 2. BigQuery: resolve the Azul dataset_id from the snapshot (system of record).
     dataset_id = resolve_dataset_id(creds, bq_project, bq_dataset, tier.billing_project)
 
-    # 3. Azul: generate the PFB manifest and obtain the signed S3 URL. Azul rejects gcloud ADC
-    #    tokens, so it uses the Azul APAT when configured; with no APAT it calls Azul without a
-    #    token (works for open-access datasets only). See docs/export_import_flow.md / auth notes.
-    azul_apat = read_azul_apat(tier)
-    if azul_apat is None:
-        logger.info(
-            "No Azul APAT configured (azul_apat_file unset); calling Azul without a token "
-            "(works for open-access datasets only)."
-        )
-    azul = AzulClient(tier.url("azul"), lambda: azul_apat, catalog=catalog)
+    # 3. Azul: generate the PFB manifest and obtain the signed S3 URL (token validated above).
+    azul = AzulClient(tier.url("azul"), lambda: azul_token, catalog=catalog)
     signed_url = azul.request_pfb_manifest(dataset_id)
 
     if dry_run:

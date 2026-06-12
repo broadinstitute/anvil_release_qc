@@ -125,13 +125,19 @@ flow itself is specified in [`docs/export_import_flow.md`](docs/export_import_fl
 - Google **ADC** everywhere; **one standard Google user account per tier**, both tiers identical.
 - Locally, a per-tier saved ADC file selected via `GOOGLE_APPLICATION_CREDENTIALS`; in deployment,
   ADC falls back to the ambient runtime identity (no code change).
-- Everything flows through one `google.auth.default()` — REST bearer tokens *and* the BigQuery client.
+- The gcloud ADC creds serve **TDR, BigQuery, and Terra** (Rawls/Firecloud): one
+  `google.auth.default()` for REST bearer tokens *and* the BigQuery client; tokens auto-refresh, so
+  long ops survive the ~1 h expiry.
+- **Azul needs its own token** — it rejects the gcloud ADC token (requires `azp` == Azul's OAuth
+  client). Capture one interactively with `anvil-data-qc azul-login` (validated via Google `tokeninfo`,
+  stored per tier in `azul_token_file`); no token ⇒ anonymous (open-access only). See
+  [`export_import_flow.md`](docs/export_import_flow.md) → Authentication and risk **R7**.
 - **Identity guard:** before any API call, resolve the active credential's email and assert it equals
   the configured email for the selected tier; abort on mismatch.
 - Scopes: plain `gcloud auth application-default login` (defaults `openid`, `email`,
   `cloud-platform`) — no custom scope string.
 
-**Config (YAML):** per-tier `{email, ADC file path, billing project}` plus the shared service URLs
+**Config (YAML):** per-tier `{email, ADC file path, billing project, azul_token_file}` plus the shared service URLs
 (from [`services.md`](docs/services.md)). Committed non-secret `config.example.yaml` + **gitignored**
 per-developer `config.yaml`.
 
@@ -191,4 +197,3 @@ material and should grow the user-facing usage/limitations docs as the flows are
   the one area where they explicitly want Claude's help.
 - This is intended to be **long-lived, multi-author** code — prioritize clarity, ease of use, and
   maintainability over cleverness.
-- Read `docs/collaboration_with_claude.md` for the original project framing.

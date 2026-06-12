@@ -16,7 +16,7 @@ of R2) is retired by *doing* rather than planning.
 | R4 | Batch-scale robustness & retained-workspace cost/quota | Medium | Watching |
 | R5 | Multi-org API drift / reverse-engineered UI flow | Medium (rising over time) | Mitigating |
 | R6 | Premature generalization in our own design | Medium | Watching |
-| R7 | Azul controlled-access auth for headless/batch | High (blocks most datasets in batch) | **Open** — gcloud + APAT both rejected; with Azul team |
+| R7 | Azul controlled-access auth for headless/batch | Medium (manual path works) | Understood — APAT index-only *by design*; interactive token + `azul-login` (built); native-client ask = security-neutral long-term fix |
 
 ---
 
@@ -92,11 +92,23 @@ case, then generalize. Keep notebooks thin (import the package; no logic).
 ### R7 — Azul authentication for controlled-access (headless/batch)
 **Impact:** Most AnVIL datasets are controlled-access and the primary use is batch — but Azul's
 registered-user validation requires a Google access token whose `azp` equals Azul's own OAuth client
-id. The gcloud ADC token (`azp` = gcloud) is rejected (401), and an APAT from `GET /user/token` is
-*also* rejected ("Invalid credentials"; `jti:0`). The interactive flow uses an authorization-code
-token (correct `azp`) issued BFF-style with **no refresh token** — awkward for headless/batch. So
-controlled-access export is currently **blocked** for automation; open-access (anonymous) is fine.
-**Mitigation / next:** Azul-team question — how should a headless/batch client obtain an Azul-accepted
-user token (is the APAT meant to be exchanged for an access token; is there a service-account path; is
-APAT support complete in dev)? See [`export_import_flow.md`](export_import_flow.md) → Authentication.
-**Revisit:** When the Azul team responds; before any controlled-access run.
+id. The gcloud ADC token (`azp` = gcloud) is rejected (401), and so is the Azul **PAT** (APAT).
+**Resolved understanding (2026-06-11):** the APAT being rejected for controlled-access is **by design,
+not a bug** — the Azul team deliberately scoped the PAT to long-term access to Azul's *index* content
+and **disallowed using it to reach controlled-access data in TDR**, to protect that data. We will
+**not** ask them to weaken that.
+**Working approach:** use the **interactive Google access token** (from the Azul Browser or Swagger
+login; `azp` = Azul's client, ~1 h, **non-refreshable**). It is used only in the **short** Azul phase
+(minutes); the long import phase uses the **refreshable** gcloud ADC token, so mid-run expiry is only
+a small Azul-phase risk. Ergonomics (**implemented 2026-06-11**): the `azul-login` CLI helper captures
++ `tokeninfo`-validates the token (`azp`, account email, `exp`) and writes the token file, and a
+pre-run gate fails fast if the Azul token is wrong-client/wrong-account/near-expiry. (Not yet run
+end-to-end for a controlled-access dataset.) One human login (~hourly) covers a large batch, since one
+token can launch many concurrent pipelines.
+**Preferred long-term fix (security-neutral — FUTURE ASK to Azul):** ask Azul to **accept a
+native/installed OAuth client for CLI login** (PKCE + loopback, no client secret). This would enable
+an unattended `gcloud auth login`-style flow **without** weakening controlled-access protection — it
+is still a real per-user Google login, still a per-user ~1 h token, still no long-lived TDR access. It
+is a *different* ask than changing the PAT (which we are not requesting). Until then, the manual
+`azul-login` path stands.
+**Revisit:** if/when we make the native-client ask; before any controlled-access batch run at scale.
