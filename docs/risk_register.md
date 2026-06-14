@@ -12,7 +12,7 @@ of R2) is retired by *doing* rather than planning.
 |----|------|----------|--------|
 | R1 | Export/import mechanics assumed, not verified | High | **Retired (open-access)** — full flow validated end-to-end on dev incl. import→Done |
 | R2 | Controlled-access correctness (auth domain; dev/prod parity) | High (compliance) | Model resolved — import auto-applies; QC verifies post-import |
-| R3 | Comparison fidelity: expected vs. unexpected differences | High | Deferred (by design) |
+| R3 | Comparison fidelity: expected vs. unexpected differences | High | T1–T2 implemented + validated (1000G PASS); T3–T4 + column-name deferred |
 | R4 | Batch-scale robustness & retained-workspace cost/quota | Medium | Watching |
 | R5 | Multi-org API drift / reverse-engineered UI flow | Medium (rising over time) | Mitigating |
 | R6 | Premature generalization in our own design | Medium | Watching |
@@ -59,7 +59,14 @@ nested) and Rawls entity attributes (JSON-ish), and especially DRS/file-referenc
 "nearly verbatim" subtler than prefix + admin columns.
 **Mitigation:** Design profile-driven comparison with real dataset examples; decide comparison depth
 deliberately (metadata+counts vs. row-level value diffing).
-**Revisit:** When the comparison engine is taken up (deferred until resources permit).
+**Update (2026-06-13):** **T1–T2 implemented and validated** against the dev 1000G dataset (`compare`
+reports PASS): strict 1:1 table parity, row counts, and AW≥TDR non-empty column counts, with the
+empty-table / empty-column and `datarepo_row_ids` normalizations, plus auth-domain verification. Built
+on the `compare/` seams (`TabularDataSource` + `ComparisonProfile` + `compare`). Residual risk now
+sits in the **deferred** depth — full column-name comparison, T3 id-set parity, T4 cell values —
+documented as honest limitations in [`comparison.md`](comparison.md).
+**Revisit:** When deferred T3/T4 / column-name comparison is taken up; and on the first dataset whose
+comparison fails (to tune the profile).
 
 ### R4 — Batch-scale robustness & retained-workspace cost/quota
 **Impact:** Across hundreds of datasets, transient failures/rate-limits/partial state are normal.

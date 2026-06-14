@@ -3,11 +3,11 @@
 Implements the export/import flow from docs/export_import_flow.md:
 
     TDR retrieveSnapshot -> BigQuery anvil_dataset.dataset_id -> Azul manifest (verbatim.pfb, poll)
-    -> Rawls createWorkspace (authorizationDomain: []) -> Firecloud importJob -> poll to success.
+    -> Rawls createWorkspace (authorizationDomain: []) -> Firecloud importJob -> poll to success
+    -> QC: AW-vs-snapshot table comparison (T1-T2) + auth-domain verification.
 
-The QC verifications (auth-domain match, table comparison) are the next layer and are not yet
-implemented. End-to-end execution requires real per-tier ADC credentials and a real TDR snapshot, and
-creates a real (retained) workspace -- run it against the dev tier.
+End-to-end execution requires real per-tier ADC credentials and a real TDR snapshot, and creates a
+real (retained) workspace -- run it against the dev tier.
 """
 
 from __future__ import annotations
@@ -35,6 +35,7 @@ from .clients.tdr import (
     snapshot_consent_code,
     snapshot_name,
 )
+from .compare.qc import run_qc_comparison
 from .config import SERVICE_URLS, load_config, resolve_tier
 from .logging_setup import LOGGER_NAME, setup_logging, write_header
 from .safety import (
@@ -185,11 +186,28 @@ def run_qc(
         durations.get("workspace_create", 0.0),
         durations.get("import", 0.0),
     )
-    logger.info("QC verifications (auth-domain match, table comparison) are the next layer (TODO).")
+
+    # 6. QC: compare the AW data tables to the TDR snapshot (T1-T2) and verify the auth domain.
+    qc = run_qc_comparison(
+        creds=creds,
+        tier=tier,
+        snapshot_id=snapshot_id,
+        bq_project=bq_project,
+        bq_dataset=bq_dataset,
+        namespace=tier.billing_project,
+        workspace_name=ws_name,
+        token_provider=google_token,
+    )
+    logger.info("QC report:\n%s", qc.render())
+    if not qc.passed:
+        logger.warning(
+            "QC FAILED for %s/%s -- see the report above.", tier.billing_project, ws_name
+        )
     return {
         "workspace_namespace": tier.billing_project,
         "workspace_name": ws_name,
         "snapshot_name": name,
+        "qc_passed": qc.passed,
         "durations": durations,
         "log_file": str(log_file),
     }
