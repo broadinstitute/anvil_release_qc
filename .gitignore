@@ -222,8 +222,11 @@ __marimo__/
 # live credentials/secrets and must never be committed.
 tmp/
 
-# Per-developer config (emails, ADC paths, billing projects) — never commit.
-config/config.yaml
+# Per-developer config (emails, ADC paths, billing projects) — never commit. Ignore every config
+# file except the committed example/template, so no local config (config.yaml, config2.yaml, …)
+# can be added accidentally.
+config/*.yaml
+!config/config.example.yaml
 
 # Local secrets: Azul access tokens, etc. — never commit.
 secrets/
