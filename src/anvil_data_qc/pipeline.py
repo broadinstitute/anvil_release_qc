@@ -43,6 +43,7 @@ from .safety import (
     assert_open_access,
     verify_pfb_handoff,
 )
+from .timing import stage_timer
 from .workspace import workspace_name
 
 logger = logging.getLogger(LOGGER_NAME)
@@ -127,8 +128,10 @@ def run_qc(
     dataset_id = resolve_dataset_id(creds, bq_project, bq_dataset, tier.billing_project)
 
     # 3. Azul: generate the PFB manifest and obtain the signed S3 URL (token validated above).
+    durations: dict[str, float] = {}
     azul = AzulClient(tier.url("azul"), lambda: azul_token, catalog=catalog)
-    signed_url = azul.request_pfb_manifest(dataset_id)
+    with stage_timer("azul_manifest", durations):
+        signed_url = azul.request_pfb_manifest(dataset_id)
 
     if dry_run:
         location = signed_url.location  # scheme+host+path only; the signed query stays contained
@@ -143,6 +146,7 @@ def run_qc(
             "bigquery": f"{bq_project}.{bq_dataset}",
             "dataset_id": dataset_id,
             "signed_url_location": location,
+            "durations": durations,
             "log_file": str(log_file),
         }
 
@@ -150,9 +154,10 @@ def run_qc(
     ws_name = workspace_name(tier.email, name)
     rawls = RawlsClient(tier.url("rawls"), google_token)
     logger.info("Creating workspace %s/%s", tier.billing_project, ws_name)
-    rawls.create_workspace(
-        tier.billing_project, ws_name, description=f"AnVIL Data Release QC export of {name}"
-    )
+    with stage_timer("workspace_create", durations):
+        rawls.create_workspace(
+            tier.billing_project, ws_name, description=f"AnVIL Data Release QC export of {name}"
+        )
 
     # 5. Firecloud: import the PFB and wait for the job to succeed.
     # Dev Terra can be slow (createWorkspace alone took ~20s); give the import submit/polls headroom.
@@ -167,16 +172,24 @@ def run_qc(
         destination_host=urlsplit(firecloud.base_url).netloc,
         allowed_prefixes=SIGNED_URL_ALLOWED_PREFIXES.get(tier.name, ()),
     )
-    submit = firecloud.submit_import_job(tier.billing_project, ws_name, signed_url)
-    job_id = import_job_id(submit)
-    logger.info("Import job submitted: %s", job_id)
-    firecloud.wait_for_import(tier.billing_project, ws_name, job_id)
+    with stage_timer("import", durations):
+        submit = firecloud.submit_import_job(tier.billing_project, ws_name, signed_url)
+        job_id = import_job_id(submit)
+        logger.info("Import job submitted: %s", job_id)
+        firecloud.wait_for_import(tier.billing_project, ws_name, job_id)
 
     logger.info("Export/import complete. Workspace: %s/%s", tier.billing_project, ws_name)
+    logger.info(
+        "Stage durations — manifest: %.1fs, workspace: %.1fs, import: %.1fs",
+        durations.get("azul_manifest", 0.0),
+        durations.get("workspace_create", 0.0),
+        durations.get("import", 0.0),
+    )
     logger.info("QC verifications (auth-domain match, table comparison) are the next layer (TODO).")
     return {
         "workspace_namespace": tier.billing_project,
         "workspace_name": ws_name,
         "snapshot_name": name,
+        "durations": durations,
         "log_file": str(log_file),
     }
