@@ -3,9 +3,11 @@
 import pytest
 
 from anvil_data_qc.clients.azul import AzulClient
+from anvil_data_qc.clients.base import BaseClient
 from anvil_data_qc.clients.firecloud import FirecloudClient, import_job_id
 from anvil_data_qc.clients.rawls import workspace_auth_domains
 from anvil_data_qc.clients.tdr import snapshot_bigquery_access, snapshot_name
+from anvil_data_qc.safety import BearerDestinationError
 
 
 class _Resp:
@@ -125,3 +127,43 @@ def test_workspace_auth_domains():
     ws = {"workspace": {"authorizationDomain": [{"membersGroupName": "AUTH_ANVIL_x"}]}}
     assert workspace_auth_domains(ws) == ["AUTH_ANVIL_x"]
     assert workspace_auth_domains({"workspace": {}}) == []
+
+
+# --- base client: bearer-token destination pinning (a token goes only to its own HTTPS host) ---
+
+
+class _Http200:
+    status_code = 200
+    reason = "OK"
+    headers: dict = {}
+
+    def raise_for_status(self):
+        pass
+
+
+def _pinned_client(base_url="https://good.example", token="tok"):
+    client = BaseClient(base_url, lambda: token)
+    client._session.request = lambda *a, **k: _Http200()  # no network
+    return client
+
+
+def test_bearer_refused_to_other_host():
+    # An off-host absolute URL while carrying the token (e.g. an unexpected Azul poll Location).
+    with pytest.raises(BearerDestinationError):
+        _pinned_client().request("GET", "https://evil.example/fetch/manifest/files/tok")
+
+
+def test_bearer_refused_over_http():
+    with pytest.raises(BearerDestinationError):
+        _pinned_client().request("GET", "http://good.example/x")  # right host, but not HTTPS
+
+
+def test_bearer_allowed_to_own_https_host():
+    client = _pinned_client()
+    client.request("GET", "/relative/path")  # -> own host
+    client.request("GET", "https://good.example/absolute")  # same host (no raise)
+
+
+def test_anonymous_request_not_host_pinned():
+    # No bearer -> nothing to leak, so the host pin does not apply.
+    _pinned_client(token="").request("GET", "https://other.example/x")  # no raise

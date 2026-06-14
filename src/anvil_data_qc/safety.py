@@ -19,6 +19,9 @@ This module provides three layers of defense-in-depth (do not weaken any without
 3. **Hand-off verification** -- ``verify_pfb_handoff`` refuses unless the import destination is the
    run tier's canonical Firecloud host, and (when configured) the signed URL originates from the run
    tier's allow-listed bucket -- so a URL from one tier can never be delivered to another.
+4. **Bearer-token destination pinning** -- the HTTP base client (``clients/base.py``) raises
+   ``BearerDestinationError`` if a bearer token would be sent to any host but the client's own HTTPS
+   host, so a token (reusable, broad access) can only ever reach its intended service.
 """
 
 from __future__ import annotations
@@ -175,3 +178,10 @@ def verify_pfb_handoff(
         destination_host,
         tier_name,
     )
+
+
+# --- Bearer-token destination pinning (enforced in clients/base.py) ---
+
+
+class BearerDestinationError(SafetyError):
+    """Raised when a bearer token would be sent to a host other than the client's own HTTPS host."""
