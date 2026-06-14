@@ -111,18 +111,23 @@ def compare(
     def google_token() -> str:
         return bearer_token(creds)
 
-    snapshot = TdrClient(resolved.url("tdr"), google_token).retrieve_snapshot(snapshot_id)
-    bq_project, bq_dataset = snapshot_bigquery_access(snapshot)
-    result = run_qc_comparison(
-        creds=creds,
-        tier=resolved,
-        snapshot_id=snapshot_id,
-        bq_project=bq_project,
-        bq_dataset=bq_dataset,
-        namespace=workspace_namespace,
-        workspace_name=workspace_name,
-        token_provider=google_token,
-    )
+    try:
+        snapshot = TdrClient(resolved.url("tdr"), google_token).retrieve_snapshot(snapshot_id)
+        bq_project, bq_dataset = snapshot_bigquery_access(snapshot)
+        result = run_qc_comparison(
+            creds=creds,
+            tier=resolved,
+            snapshot_id=snapshot_id,
+            bq_project=bq_project,
+            bq_dataset=bq_dataset,
+            namespace=workspace_namespace,
+            workspace_name=workspace_name,
+            token_provider=google_token,
+        )
+    except SafetyError as exc:
+        # Safety gate (e.g. a bearer-token destination violation; see safety.py). Clean message.
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from exc
     typer.echo(result.render())
     raise typer.Exit(0 if result.passed else 1)
 
