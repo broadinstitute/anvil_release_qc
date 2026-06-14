@@ -17,7 +17,7 @@ of R2) is retired by *doing* rather than planning.
 | R5 | Multi-org API drift / reverse-engineered UI flow | Medium (rising over time) | Mitigating |
 | R6 | Premature generalization in our own design | Medium | Watching |
 | R7 | Azul controlled-access auth for headless/batch | Medium (manual path works) | Understood — APAT index-only *by design*; interactive token + `azul-login` (built); native-client ask = security-neutral long-term fix |
-| R8 | Controlled-access PFB signed-URL mishandling → Federal DMI | High (compliance) | Mitigated — fail-closed consent gate (NRES-only); controlled-access blocked pending security review |
+| R8 | Controlled-access PFB signed-URL mishandling → Federal DMI | High (compliance) | Mitigated (defense-in-depth: consent gate + SignedUrl containment + hand-off verification); controlled-access blocked pending security review |
 
 ---
 
@@ -120,10 +120,15 @@ tabular data**. Mishandling it — e.g. importing a **production** signed URL in
 tier**, or any unintended destination — would be a **Federal Data Management Incident**. As a
 long-lived, multi-operator tool, human/config error over time is a real risk even when the current
 code is correct.
-**Mitigation (2026-06-14):** a **fail-closed consent gate** (`src/anvil_data_qc/safety.py`): the
-pipeline proceeds only when the TDR snapshot's top-level `consentCode` is exactly `"NRES"`
-(open-access). Empty/unknown/any other value is **blocked, in every tier, before any signed URL is
-generated**. The pipeline is **not yet approved for controlled-access data** — that requires a
-security-team review of the end-to-end flow. Until then it serves the 13 open-access prod datasets.
+**Mitigation (2026-06-14):** three defense-in-depth layers in `src/anvil_data_qc/safety.py`.
+(1) **Fail-closed consent gate** — the pipeline proceeds only when the snapshot's top-level
+`consentCode` is exactly `"NRES"`; empty/unknown/any other value is blocked, in every tier, **before
+any signed URL is generated**. (2) **Containment** — the signed URL is wrapped in a redacting
+`SignedUrl` (not loggable or JSON-serializable; the raw value is revealed only at the single importJob
+call site). (3) **Hand-off verification** (`verify_pfb_handoff`) — before delivery, the destination
+must be the run tier's canonical Firecloud host **and** the URL must originate from the tier's
+allow-listed bucket (enforced for dev; warned for prod until its bucket is confirmed). The pipeline is
+**not yet approved for controlled-access data** — that requires a security-team review of the
+end-to-end flow. Until then it serves the 13 open-access prod datasets.
 **Revisit:** Only after the security review, before enabling controlled-access; re-affirm the gate is
 intact on each release.

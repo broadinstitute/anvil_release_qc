@@ -35,9 +35,14 @@ from .clients.tdr import (
     snapshot_consent_code,
     snapshot_name,
 )
-from .config import load_config, resolve_tier
+from .config import SERVICE_URLS, load_config, resolve_tier
 from .logging_setup import LOGGER_NAME, setup_logging, write_header
-from .safety import ControlledAccessNotApprovedError, assert_open_access
+from .safety import (
+    SIGNED_URL_ALLOWED_PREFIXES,
+    ControlledAccessNotApprovedError,
+    assert_open_access,
+    verify_pfb_handoff,
+)
 from .workspace import workspace_name
 
 logger = logging.getLogger(LOGGER_NAME)
@@ -126,8 +131,7 @@ def run_qc(
     signed_url = azul.request_pfb_manifest(dataset_id)
 
     if dry_run:
-        parts = urlsplit(signed_url)
-        location = f"{parts.scheme}://{parts.netloc}{parts.path}"  # drop the signed query (secret)
+        location = signed_url.location  # scheme+host+path only; the signed query stays contained
         logger.info(
             "Dry run: export side validated (TDR -> BigQuery -> Azul). Signed PFB URL at %s. "
             "Skipping workspace creation and import.",
@@ -153,6 +157,16 @@ def run_qc(
     # 5. Firecloud: import the PFB and wait for the job to succeed.
     # Dev Terra can be slow (createWorkspace alone took ~20s); give the import submit/polls headroom.
     firecloud = FirecloudClient(tier.url("firecloud"), google_token, timeout=180)
+    # Verify the signed URL is delivered only to this tier's import service (and is from this tier's
+    # source) before handing it over -- defense against a controlled-access PFB reaching a wrong/dev
+    # destination (a Federal DMI). See safety.verify_pfb_handoff.
+    verify_pfb_handoff(
+        signed_url,
+        tier_name=tier.name,
+        expected_firecloud_host=urlsplit(SERVICE_URLS[tier.name]["firecloud"]).netloc,
+        destination_host=urlsplit(firecloud.base_url).netloc,
+        allowed_prefixes=SIGNED_URL_ALLOWED_PREFIXES.get(tier.name, ()),
+    )
     submit = firecloud.submit_import_job(tier.billing_project, ws_name, signed_url)
     job_id = import_job_id(submit)
     logger.info("Import job submitted: %s", job_id)

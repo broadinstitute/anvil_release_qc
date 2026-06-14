@@ -16,6 +16,7 @@ import time
 from collections.abc import Callable
 
 from ..logging_setup import LOGGER_NAME
+from ..safety import SignedUrl
 from .base import BaseClient
 
 logger = logging.getLogger(LOGGER_NAME)
@@ -40,12 +41,16 @@ class AzulClient(BaseClient):
             self._catalog = self.request("GET", "/index/catalogs").json()["default_catalog"]
         return self._catalog
 
-    def request_pfb_manifest(self, dataset_id: str, max_wait: float = 900.0) -> str:
-        """Submit the PFB manifest job for ``dataset_id`` and poll until the signed URL is returned."""
+    def request_pfb_manifest(self, dataset_id: str, max_wait: float = 900.0) -> SignedUrl:
+        """Submit the PFB manifest job for ``dataset_id`` and poll until the signed URL is returned.
+
+        The result is wrapped in :class:`~anvil_data_qc.safety.SignedUrl` -- a redacting holder for the
+        sensitive controlled-access credential; unwrap it only at the import hand-off.
+        """
         filters = json.dumps({"datasets.dataset_id": {"is": [dataset_id]}})
         params = {"catalog": self.default_catalog(), "filters": filters, "format": PFB_FORMAT}
         body = self.request("PUT", "/fetch/manifest/files", params=params).json()
-        return self._poll(body, max_wait)
+        return SignedUrl(self._poll(body, max_wait))
 
     def _poll(self, body: dict, max_wait: float) -> str:
         deadline = time.monotonic() + max_wait

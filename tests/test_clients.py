@@ -55,8 +55,9 @@ def test_azul_request_pfb_manifest_polls_to_signed_url(monkeypatch):
     monkeypatch.setattr(client, "request", fake_request)
     monkeypatch.setattr("anvil_data_qc.clients.azul.time.sleep", lambda _s: None)
 
-    url = client.request_pfb_manifest("265ecd43-c88f-19e9-4da1-b6cd1d07a557")
-    assert url == "https://s3.example/m.avro?X-Amz-Signature=zzz"
+    signed = client.request_pfb_manifest("265ecd43-c88f-19e9-4da1-b6cd1d07a557")
+    assert signed.reveal() == "https://s3.example/m.avro?X-Amz-Signature=zzz"  # SignedUrl wrapper
+    assert signed.location == "https://s3.example/m.avro"  # query (secret) dropped
     # First call is the PUT with the dataset_id filter and verbatim.pfb format.
     method, path, params = calls[0]
     assert method == "PUT" and path == "/fetch/manifest/files"

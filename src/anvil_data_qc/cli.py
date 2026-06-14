@@ -22,7 +22,7 @@ from .azul_auth import (
 )
 from .config import load_config, resolve_tier
 from .pipeline import run_qc
-from .safety import ControlledAccessNotApprovedError
+from .safety import SafetyError
 
 app = typer.Typer(
     help="AnVIL Data Release QC: export a TDR snapshot to a Terra workspace and verify it.",
@@ -69,8 +69,8 @@ def qc(
             dry_run=dry_run,
             catalog=catalog,
         )
-    except ControlledAccessNotApprovedError as exc:
-        # Safety gate: not approved for controlled-access data (see safety.py). Clean message, no trace.
+    except SafetyError as exc:
+        # Safety gate (consent / signed-URL hand-off; see safety.py). Clean message, no traceback.
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from exc
 
