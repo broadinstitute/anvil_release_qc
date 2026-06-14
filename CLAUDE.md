@@ -92,6 +92,13 @@ The flow is **driven by the TDR snapshot id** (system of record); Azul's identif
 only. **BigQuery is a core dependency** — used first to resolve the Azul `dataset_id` from the
 snapshot's `anvil_dataset` table, then for the table comparison.
 
+**Safety gate (open-access only, for now):** the pipeline proceeds only when the snapshot's
+`consentCode` is exactly `NRES` (open-access); any other value — including empty/unknown — is blocked
+**fail-closed, before any PFB signed URL is generated**. A controlled-access signed URL grants direct
+access to an NIH study's controlled data; mishandling it is a Federal DMI. Controlled-access use
+requires a security-team review first. See [`src/anvil_data_qc/safety.py`](src/anvil_data_qc/safety.py)
+and risk **R8**. Do not weaken the gate (e.g. treat empty as open) without that review.
+
 ## Deployment / structure constraints (decide code layout with these in mind)
 
 Two delivery modes must both be supported, which should drive how code is organized:

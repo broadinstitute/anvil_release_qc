@@ -15,6 +15,12 @@ automation mirrors. Endpoints and per-tier URLs: [`services.md`](services.md).
 > `importJob` → `Done`. The **controlled-access** path depends on resolving Azul auth (see
 > [Authentication](#authentication)).
 
+> **⚠️ Safety gate — open-access only (for now).** This pipeline is **not yet approved for
+> controlled-access data**. It proceeds only when the snapshot's top-level `consentCode` is exactly
+> `NRES`; any other value — including empty/unknown — is **blocked before any PFB signed URL is
+> generated** (a controlled-access signed URL is highly sensitive — see risk **R8** and
+> `src/anvil_data_qc/safety.py`). Controlled-access requires a security-team review first.
+
 ## Identifiers (worked example from the capture)
 
 | Identifier | Example value | Source of truth |
@@ -39,6 +45,9 @@ Ways to identify whether a dataset/snapshot is open- or controlled-access:
   is set to **`NRES`** (meaning no restrictions).
 - Additionally, **controlled-access** snapshots have an **Authorization Domain** set; **open-access**
   snapshots do not.
+- The pipeline reads **`consentCode` from the top level** of the TDR `retrieveSnapshot` response
+  (confirmed `NRES` for the open-access 1000G snapshot; `phs_id`/`consent_name` are empty there). The
+  **safety gate** (`safety.py`) requires an explicit `NRES` to proceed — see the callout above and R8.
 
 ## Authentication
 

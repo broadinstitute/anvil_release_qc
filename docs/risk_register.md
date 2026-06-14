@@ -17,6 +17,7 @@ of R2) is retired by *doing* rather than planning.
 | R5 | Multi-org API drift / reverse-engineered UI flow | Medium (rising over time) | Mitigating |
 | R6 | Premature generalization in our own design | Medium | Watching |
 | R7 | Azul controlled-access auth for headless/batch | Medium (manual path works) | Understood — APAT index-only *by design*; interactive token + `azul-login` (built); native-client ask = security-neutral long-term fix |
+| R8 | Controlled-access PFB signed-URL mishandling → Federal DMI | High (compliance) | Mitigated — fail-closed consent gate (NRES-only); controlled-access blocked pending security review |
 
 ---
 
@@ -112,3 +113,17 @@ is still a real per-user Google login, still a per-user ~1 h token, still no lon
 is a *different* ask than changing the PAT (which we are not requesting). Until then, the manual
 `azul-login` path stands.
 **Revisit:** if/when we make the native-client ask; before any controlled-access batch run at scale.
+
+### R8 — Controlled-access PFB signed-URL mishandling (Federal DMI)
+**Impact:** The Azul PFB signed URL grants direct access to **all of an NIH study's controlled-access
+tabular data**. Mishandling it — e.g. importing a **production** signed URL into the **insecure dev
+tier**, or any unintended destination — would be a **Federal Data Management Incident**. As a
+long-lived, multi-operator tool, human/config error over time is a real risk even when the current
+code is correct.
+**Mitigation (2026-06-14):** a **fail-closed consent gate** (`src/anvil_data_qc/safety.py`): the
+pipeline proceeds only when the TDR snapshot's top-level `consentCode` is exactly `"NRES"`
+(open-access). Empty/unknown/any other value is **blocked, in every tier, before any signed URL is
+generated**. The pipeline is **not yet approved for controlled-access data** — that requires a
+security-team review of the end-to-end flow. Until then it serves the 13 open-access prod datasets.
+**Revisit:** Only after the security review, before enabling controlled-access; re-affirm the gate is
+intact on each release.

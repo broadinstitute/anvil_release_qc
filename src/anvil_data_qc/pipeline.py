@@ -29,9 +29,15 @@ from .bigquery import resolve_dataset_id
 from .clients.azul import AzulClient
 from .clients.firecloud import FirecloudClient, import_job_id
 from .clients.rawls import RawlsClient
-from .clients.tdr import TdrClient, snapshot_bigquery_access, snapshot_name
+from .clients.tdr import (
+    TdrClient,
+    snapshot_bigquery_access,
+    snapshot_consent_code,
+    snapshot_name,
+)
 from .config import load_config, resolve_tier
 from .logging_setup import LOGGER_NAME, setup_logging, write_header
+from .safety import ControlledAccessNotApprovedError, assert_open_access
 from .workspace import workspace_name
 
 logger = logging.getLogger(LOGGER_NAME)
@@ -95,6 +101,20 @@ def run_qc(
     tdr = TdrClient(tier.url("tdr"), google_token)
     snapshot = tdr.retrieve_snapshot(snapshot_id)
     name = snapshot_name(snapshot)
+
+    # SAFETY GATE: only explicitly open-access snapshots may proceed. The Azul PFB signed URL grants
+    # direct access to an NIH study's controlled-access tabular data; mishandling it (e.g. importing a
+    # prod signed URL into the insecure dev tier) is a Federal Data Management Incident. This pipeline
+    # is NOT yet approved for controlled-access data (pending security review), so anything other than
+    # an explicit "NRES" consentCode is blocked here -- before any signed URL is generated. See safety.py.
+    consent_code = snapshot_consent_code(snapshot)
+    try:
+        assert_open_access(snapshot_id, consent_code)
+    except ControlledAccessNotApprovedError as exc:
+        logger.error("%s", exc)
+        raise
+    logger.info("Consent gate OK: snapshot is open-access (consentCode=%r).", consent_code)
+
     bq_project, bq_dataset = snapshot_bigquery_access(snapshot)
     logger.info("Snapshot '%s' -> BigQuery %s.%s", name, bq_project, bq_dataset)
 

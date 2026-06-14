@@ -22,6 +22,7 @@ from .azul_auth import (
 )
 from .config import load_config, resolve_tier
 from .pipeline import run_qc
+from .safety import ControlledAccessNotApprovedError
 
 app = typer.Typer(
     help="AnVIL Data Release QC: export a TDR snapshot to a Terra workspace and verify it.",
@@ -60,13 +61,18 @@ def qc(
     ),
 ) -> None:
     """Run the export/import + QC flow for one TDR snapshot."""
-    run_qc(
-        snapshot_id=snapshot_id,
-        tier_name=tier,
-        config_path=config,
-        dry_run=dry_run,
-        catalog=catalog,
-    )
+    try:
+        run_qc(
+            snapshot_id=snapshot_id,
+            tier_name=tier,
+            config_path=config,
+            dry_run=dry_run,
+            catalog=catalog,
+        )
+    except ControlledAccessNotApprovedError as exc:
+        # Safety gate: not approved for controlled-access data (see safety.py). Clean message, no trace.
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from exc
 
 
 @app.command("azul-login")

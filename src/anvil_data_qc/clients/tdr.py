@@ -10,6 +10,8 @@ dev-tier run.
 
 from __future__ import annotations
 
+from typing import Optional
+
 from .base import BaseClient
 
 
@@ -21,6 +23,15 @@ class TdrClient(BaseClient):
             f"/api/repository/v1/snapshots/{snapshot_id}",
             params={"include": ["ACCESS_INFORMATION", "SOURCES", "PROPERTIES"]},
         ).json()
+
+
+def snapshot_consent_code(snapshot: dict) -> Optional[str]:
+    """The snapshot's top-level ``consentCode``.
+
+    ``"NRES"`` (No Restrictions) means open-access; anything else -- including empty or missing -- is
+    controlled-access or unknown. Used by the safety gate (see ``anvil_data_qc.safety``).
+    """
+    return snapshot.get("consentCode")
 
 
 def snapshot_name(snapshot: dict) -> str:
