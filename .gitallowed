@@ -1,0 +1,11 @@
+# git-secrets allowances, shared via the repo (read automatically by git-secrets).
+#
+# scripts/setup-git-secrets.sh *defines* the secret-scanning patterns; those definition lines are
+# not secrets, but some (e.g. the private-key pattern) match their own definition. Exempt any line
+# that registers a pattern. Every such line contains "secrets.patterns", which no real secret would.
+secrets\.patterns
+
+# Fabricated, non-secret test fixtures (tests/test_redaction.py): synthetic AWS-key / JWT shapes
+# used to exercise log redaction. These are not real credentials.
+ASIAUHATKQ7OVN5RMSE6
+eyJhbGciOiJFUzI1NiJ9\.eyJzdWIiOiJ4In0\.c2lnbmF0dXJlX3ZhbHVl

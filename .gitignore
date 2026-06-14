@@ -216,3 +216,21 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- Project-specific ---
+# Local working area for HTTP captures (HAR), scratch files, etc. These can contain
+# live credentials/secrets and must never be committed.
+tmp/
+
+# Per-developer config (emails, ADC paths, billing projects) — never commit.
+config/config.yaml
+
+# Local secrets: Azul access tokens, etc. — never commit.
+secrets/
+
+# Run logs.
+logs/
+
+# Editor / OS files.
+.DS_Store
+.idea/

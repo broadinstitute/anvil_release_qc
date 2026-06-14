@@ -1,0 +1,152 @@
+"""Tests for Azul access-token handling (anvil_data_qc.azul_auth), no network."""
+
+import pytest
+
+from anvil_data_qc import azul_auth
+from anvil_data_qc.azul_auth import (
+    AzulTokenError,
+    discover_azul_client_id,
+    expected_client_id,
+    extract_bearer_token,
+    read_azul_token,
+    validate_azul_token,
+    write_azul_token,
+)
+from anvil_data_qc.config import ResolvedTier
+
+_CLIENT_ID = "111-abcDEF.apps.googleusercontent.com"
+_EMAIL = "dev-user@test.firecloud.org"
+
+
+def _tier(token_file=None, client_id=None):
+    return ResolvedTier(
+        name="dev",
+        email=_EMAIL,
+        adc_credentials_file=None,
+        billing_project="b",
+        azul_token_file=token_file,
+        azul_oauth2_client_id=client_id,
+        service_urls={"azul": "https://azul.example/"},
+    )
+
+
+class _FakeResp:
+    def __init__(self, text="", status=200):
+        self.text = text
+        self.status_code = status
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise AssertionError("http error")
+
+
+def _info(azp=_CLIENT_ID, email=_EMAIL, expires_in="3600"):
+    return {"azp": azp, "email": email, "expires_in": expires_in}
+
+
+# --- extract_bearer_token ---
+
+
+def test_extract_bearer_from_curl():
+    curl = "curl -X 'GET' 'https://azul.example/index' -H 'Authorization: Bearer abc.def-123_456'"
+    assert extract_bearer_token(curl) == "abc.def-123_456"
+
+
+def test_extract_bearer_raw_token():
+    assert extract_bearer_token("  abc.def-123_456  ") == "abc.def-123_456"
+
+
+def test_extract_bearer_rejects_garbage():
+    with pytest.raises(AzulTokenError):
+        extract_bearer_token("this is not a token")
+
+
+# --- discover_azul_client_id ---
+
+
+def test_discover_client_id(monkeypatch):
+    js = f'const client_id = "{_CLIENT_ID}";\n  clientId: client_id,'
+    monkeypatch.setattr(azul_auth.requests, "get", lambda *a, **k: _FakeResp(js))
+    assert discover_azul_client_id("https://azul.example/") == _CLIENT_ID
+
+
+def test_discover_client_id_not_found(monkeypatch):
+    monkeypatch.setattr(azul_auth.requests, "get", lambda *a, **k: _FakeResp("no id here"))
+    with pytest.raises(AzulTokenError):
+        discover_azul_client_id("https://azul.example/")
+
+
+# --- validate_azul_token (tokeninfo mocked) ---
+
+
+def test_validate_ok(monkeypatch):
+    monkeypatch.setattr(azul_auth, "tokeninfo", lambda t: _info())
+    info = validate_azul_token("tok", expected_azp=_CLIENT_ID, expected_email=_EMAIL)
+    assert info["azp"] == _CLIENT_ID
+
+
+def test_validate_azp_mismatch(monkeypatch):
+    monkeypatch.setattr(
+        azul_auth, "tokeninfo", lambda t: _info(azp="999-x.apps.googleusercontent.com")
+    )
+    with pytest.raises(AzulTokenError, match="azp"):
+        validate_azul_token("tok", expected_azp=_CLIENT_ID)
+
+
+def test_validate_email_mismatch(monkeypatch):
+    monkeypatch.setattr(azul_auth, "tokeninfo", lambda t: _info(email="someone@else.org"))
+    with pytest.raises(AzulTokenError):
+        validate_azul_token("tok", expected_azp=_CLIENT_ID, expected_email=_EMAIL)
+
+
+def test_validate_expired(monkeypatch):
+    monkeypatch.setattr(azul_auth, "tokeninfo", lambda t: _info(expires_in="60"))
+    with pytest.raises(AzulTokenError, match="expires"):
+        validate_azul_token("tok", expected_azp=_CLIENT_ID, min_remaining_seconds=300)
+
+
+# --- read / write token file ---
+
+
+def test_read_token_unset_returns_none():
+    assert read_azul_token(_tier(token_file=None)) is None
+
+
+def test_read_token_missing_raises(tmp_path):
+    with pytest.raises(FileNotFoundError):
+        read_azul_token(_tier(token_file=str(tmp_path / "nope.txt")))
+
+
+def test_read_token_empty_or_comments_returns_none(tmp_path):
+    f = tmp_path / "tok.txt"
+    f.write_text("# only comments\n\n")
+    assert read_azul_token(_tier(token_file=str(f))) is None
+
+
+def test_write_then_read_roundtrip(tmp_path):
+    f = tmp_path / "secrets" / "azul-token-dev.txt"
+    tier = _tier(token_file=str(f))
+    path = write_azul_token(tier, "the-access-token-value", _info())
+    assert path == f
+    assert (path.stat().st_mode & 0o777) == 0o600
+    assert path.read_text().startswith("#")  # human-readable header
+    assert read_azul_token(tier) == "the-access-token-value"
+
+
+def test_write_token_no_file_configured_raises():
+    with pytest.raises(AzulTokenError):
+        write_azul_token(_tier(token_file=None), "tok", _info())
+
+
+# --- expected_client_id ---
+
+
+def test_expected_client_id_prefers_config():
+    assert expected_client_id(_tier(client_id=_CLIENT_ID)) == _CLIENT_ID
+
+
+def test_expected_client_id_discovers(monkeypatch):
+    monkeypatch.setattr(
+        azul_auth.requests, "get", lambda *a, **k: _FakeResp(f'const client_id = "{_CLIENT_ID}";')
+    )
+    assert expected_client_id(_tier(client_id=None)) == _CLIENT_ID

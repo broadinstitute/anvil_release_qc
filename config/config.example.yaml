@@ -1,0 +1,32 @@
+# anvil-data-qc configuration — EXAMPLE / TEMPLATE.
+#
+# Copy this to config/config.yaml (which is gitignored) and fill in your own values:
+#     cp config/config.example.yaml config/config.yaml
+#
+# Only per-developer settings live here. The shared, non-secret service URLs are baked into the
+# package (see src/anvil_data_qc/config.py, mirroring docs/services.md), so you do not list them.
+
+default_tier: dev
+
+tiers:
+  dev:
+    # Your Google account for the DEV tier (must match the active ADC identity — enforced at runtime).
+    email: you@test.firecloud.org
+    # Saved ADC credentials for this tier. Create with:
+    #   gcloud auth application-default login        # signed in as the dev account
+    # then copy ~/.config/gcloud/application_default_credentials.json to this path.
+    # Omit (or set null) to use the ambient runtime identity (e.g. in a Terra workflow).
+    adc_credentials_file: ~/.config/anvil-data-qc/adc-dev.json
+    # Terra billing project = the workspace namespace for created workspaces.
+    billing_project: your-dev-billing-project
+    # Azul access-token file (gitignored). Populate it with:  anvil-data-qc azul-login --tier dev
+    # Azul needs a token issued to its own OAuth client; a plain gcloud ADC token is rejected.
+    azul_token_file: secrets/azul-token-dev.txt
+    # Optional: the Azul OAuth client id a token must carry (azp). Auto-discovered from Azul if unset.
+    # azul_oauth2_client_id: "<client-id>.apps.googleusercontent.com"
+
+  prod:
+    email: you@example.org
+    adc_credentials_file: ~/.config/anvil-data-qc/adc-prod.json
+    billing_project: your-prod-billing-project
+    azul_token_file: secrets/azul-token-prod.txt
