@@ -37,9 +37,11 @@ logger = logging.getLogger(LOGGER_NAME)
 # Google's token introspection endpoint — the same one Azul's validate() uses.
 TOKENINFO_URL = "https://www.googleapis.com/oauth2/v3/tokeninfo"
 
-# Required remaining lifetime (seconds) before a run. The Azul phase takes minutes, so a small buffer
-# suffices; we fail fast (telling the user to re-run azul-login) rather than expire mid-run.
-MIN_TOKEN_SECONDS_FOR_RUN = 300
+# Required remaining lifetime (seconds) before a run. Azul tokens last ~1 h; for batch use this
+# budgets ~30 min for the operator to set up/launch the batch and ~30 min for Azul's work -- large
+# AnVIL studies and concurrent indexing load can make the Azul phase slow. Fail fast (re-run
+# azul-login) rather than expire mid-run.
+MIN_TOKEN_SECONDS_FOR_RUN = 1800  # 30 minutes
 
 # A Google OAuth client id, e.g. "5615...-3cv4....apps.googleusercontent.com".
 _CLIENT_ID_RE = re.compile(r"([0-9]+-[A-Za-z0-9_]+\.apps\.googleusercontent\.com)")
