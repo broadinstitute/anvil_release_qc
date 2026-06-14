@@ -59,6 +59,12 @@ class BaseClient:
         if "Authorization" in all_headers:
             target = urlsplit(url)
             if target.scheme != "https" or target.netloc != self._host:
+                logger.warning(
+                    "Refused to send a bearer token to %s://%s (expected https://%s).",
+                    target.scheme,
+                    target.netloc,
+                    self._host,
+                )
                 raise BearerDestinationError(
                     f"Refusing to send a bearer token to {target.scheme}://{target.netloc} "
                     f"(expected https://{self._host}). A token may only go to its own service host."

@@ -1,5 +1,7 @@
 """Unit tests for client logic that doesn't need network (mocked HTTP)."""
 
+import logging
+
 import pytest
 
 from anvil_data_qc.clients.azul import AzulClient
@@ -7,6 +9,7 @@ from anvil_data_qc.clients.base import BaseClient
 from anvil_data_qc.clients.firecloud import FirecloudClient, import_job_id
 from anvil_data_qc.clients.rawls import workspace_auth_domains
 from anvil_data_qc.clients.tdr import snapshot_bigquery_access, snapshot_name
+from anvil_data_qc.logging_setup import LOGGER_NAME
 from anvil_data_qc.safety import BearerDestinationError
 
 
@@ -167,3 +170,13 @@ def test_bearer_allowed_to_own_https_host():
 def test_anonymous_request_not_host_pinned():
     # No bearer -> nothing to leak, so the host pin does not apply.
     _pinned_client(token="").request("GET", "https://other.example/x")  # no raise
+
+
+def test_bearer_refusal_is_logged(caplog):
+    # The refusal is audit-logged (host only, no token) before raising.
+    client = _pinned_client(token="SECRETxyz123")
+    with caplog.at_level(logging.WARNING, logger=LOGGER_NAME):
+        with pytest.raises(BearerDestinationError):
+            client.request("GET", "https://evil.example/x")
+    assert "Refused to send a bearer token" in caplog.text
+    assert "SECRETxyz123" not in caplog.text  # the token value is never in the audit log

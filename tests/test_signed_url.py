@@ -21,7 +21,9 @@ _RAW = (
     "manifests/x.avro?AWSAccessKeyId=FAKEKEYID&Signature=fakesigvalue&x-amz-security-token=faketoken"
 )
 _SECRETS = ("FAKEKEYID", "fakesigvalue", "faketoken")
-_DEV_PREFIX = ("https://s3.amazonaws.com/edu-ucsc-gi-platform-anvil-dev-storage-anvildev",)
+_DEV_PREFIX = (
+    "https://s3.amazonaws.com/edu-ucsc-gi-platform-anvil-dev-storage-anvildev.us-east-1/",
+)
 _DEV_FIRECLOUD = "firecloud-orchestration.dsde-dev.broadinstitute.org"
 _SRC = Path(__file__).resolve().parent.parent / "src" / "anvil_data_qc"
 
@@ -126,6 +128,19 @@ def test_prod_provenance_is_configured_and_enforced():
     with pytest.raises(SignedUrlProvenanceError):
         verify_pfb_handoff(
             dev_url_in_prod,
+            tier_name="prod",
+            expected_firecloud_host="api.firecloud.org",
+            destination_host="api.firecloud.org",
+            allowed_prefixes=prod_prefixes,
+        )
+    # A sibling bucket sharing the name prefix must NOT pass (allow-list is bucket-boundary-anchored).
+    sibling = SignedUrl(
+        "https://s3.amazonaws.com/edu-ucsc-gi-platform-anvil-prod-storage-anvilprod-attacker/x.avro"
+        "?Signature=fakesig"
+    )
+    with pytest.raises(SignedUrlProvenanceError):
+        verify_pfb_handoff(
+            sibling,
             tier_name="prod",
             expected_firecloud_host="api.firecloud.org",
             destination_host="api.firecloud.org",

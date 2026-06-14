@@ -117,9 +117,14 @@ class SignedUrl:
 #: still apply regardless.
 SIGNED_URL_ALLOWED_PREFIXES: dict[str, tuple[str, ...]] = {
     # Verified against real signed URLs (2026-06-14): dev from the 1000G run, prod from an interactive
-    # open-access flow. Same host (path-style s3.amazonaws.com), parallel dev/prod buckets.
-    "dev": ("https://s3.amazonaws.com/edu-ucsc-gi-platform-anvil-dev-storage-anvildev",),
-    "prod": ("https://s3.amazonaws.com/edu-ucsc-gi-platform-anvil-prod-storage-anvilprod",),
+    # open-access flow. Same host (path-style s3.amazonaws.com), parallel dev/prod buckets. Each prefix
+    # carries the FULL bucket name and a trailing "/", so the startswith check is anchored at the
+    # bucket boundary -- a sibling bucket (e.g. "...-anvildev-attacker") cannot satisfy it. Update these
+    # if the AnVIL storage bucket name or its region ever changes.
+    "dev": ("https://s3.amazonaws.com/edu-ucsc-gi-platform-anvil-dev-storage-anvildev.us-east-1/",),
+    "prod": (
+        "https://s3.amazonaws.com/edu-ucsc-gi-platform-anvil-prod-storage-anvilprod.us-east-1/",
+    ),
 }
 
 
