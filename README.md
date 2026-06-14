@@ -68,13 +68,23 @@ limitations in the flow doc). These are the steps the tooling supports today.
    # add --dry-run to validate the export side only (no workspace created, no import run)
    ```
 
+   The pipeline ends by comparing the new workspace's data tables to the snapshot (table parity, row
+   and column counts) and verifying the auth domain. To QC an **existing** workspace without
+   re-importing:
+
+   ```bash
+   anvil-data-qc compare --snapshot-id <id> \
+     --workspace-namespace <billing-project> --workspace-name <name> --tier dev
+   ```
+
 See [`docs/export_import_flow.md`](docs/export_import_flow.md) → Authentication for why two tokens are
-needed and how `azul-login` works.
+needed, and [`docs/comparison.md`](docs/comparison.md) for what the comparison checks (and its limits).
 
 ## Documentation
 
 - [`CLAUDE.md`](CLAUDE.md) — architecture, design decisions, and conventions.
 - [`docs/services.md`](docs/services.md) — service registry (repos, OpenAPI specs, per-tier URLs).
 - [`docs/export_import_flow.md`](docs/export_import_flow.md) — the resolved ADE→Terra export/import API flow.
+- [`docs/comparison.md`](docs/comparison.md) — the AW↔snapshot table comparison (QC) and its limitations.
 - [`docs/capturing_http_traffic.md`](docs/capturing_http_traffic.md) — capturing & scrubbing HAR flows.
 - [`docs/risk_register.md`](docs/risk_register.md) — tracked project risks.

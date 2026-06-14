@@ -4,20 +4,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-The design is fully derisked and the **export/import flow is implemented** (spike). The package
-`src/anvil_data_qc/` provides: `config` (YAML + pydantic, tier resolution), `auth` (ADC per tier +
-identity guard), `logging_setup`, `clients/` (base + `tdr`, `azul`, `rawls`, `firecloud`),
-`bigquery`, `workspace` (naming), `pipeline` (the wired flow), and `cli` (Typer). The pipeline runs
-TDR → BigQuery `dataset_id` → Azul manifest → Rawls `createWorkspace` → Firecloud `importJob`.
+The design is fully derisked, and the **export/import flow plus the first QC layer are implemented and
+validated against dev**. The package `src/anvil_data_qc/` provides: `config` (YAML + pydantic, tier
+resolution), `auth` (ADC per tier + identity guard), `azul_auth` (Azul token capture/validation),
+`logging_setup`, `clients/` (base + `tdr`, `azul`, `rawls`, `firecloud`, `sam`), `bigquery`,
+`workspace` (naming), `compare/` (the comparison seams: `sources`, `profile`, `engine`, `report`,
+`authdomain`, `qc`), `pipeline` (the wired flow), and `cli` (Typer: `qc`, `compare`, `azul-login`).
+The pipeline runs TDR → BigQuery `dataset_id` → Azul manifest → Rawls `createWorkspace` → Firecloud
+`importJob` → **QC** (AW-vs-snapshot table comparison + auth-domain verification).
 
 **Status of the implementation:**
 - ✅ Unit tests pass (`pytest`, mocked HTTP) and `ruff` is clean.
-- ⏳ **Not yet run end-to-end** — that needs real per-tier ADC creds + a real snapshot and creates a
-  real retained workspace (run against **dev** first). Two parts are **inferred** (no capture existed)
-  and flagged in the code to confirm on the first run: the **TDR `retrieveSnapshot`** response shape,
-  and the **`importJob`** job-id field + status values.
-- ⏭️ **Next layer (not built):** the QC verifications — auth-domain match and the AW-vs-snapshot table
-  comparison (with the `sources/`/`compare/` seams).
+- ✅ **Validated end-to-end against dev** for the **open-access 1000G** snapshot: TDR → BigQuery →
+  Azul (anonymous) → workspace → import → **`compare` reports QC PASS** (12 tables; row + column-count
+  parity; empty TDR tables and `datarepo_row_ids` correctly excluded; auth-domain match).
+- ⏳ **Controlled-access not yet exercised end-to-end** — needs an Azul token (`azul-login`, R7) and a
+  controlled dataset (to truly test the auth-domain check, which 1000G leaves empty).
+- ⏭️ **Deferred QC depth** (see [`docs/comparison.md`](docs/comparison.md)): full column-name
+  comparison, T3 id-set parity, T4 cell-value comparison.
 
 Environment: Python **3.13.14** (pyenv; pinned in `.python-version`), local `.venv`, deps from
 `pyproject.toml` with pinned `requirements.txt` / `requirements-dev.txt` (pip-tools). See the README

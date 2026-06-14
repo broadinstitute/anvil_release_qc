@@ -40,6 +40,14 @@ class RawlsClient(BaseClient):
         params = {"fields": fields} if fields else None
         return self.request("GET", f"/api/workspaces/{namespace}/{name}", params=params).json()
 
+    def entity_type_metadata(self, namespace: str, name: str) -> dict:
+        """GET /api/workspaces/{ns}/{name}/entities.
+
+        Returns ``{entityType: {"count": N, "attributeNames": [...], "idName": "..."}}`` -- the
+        structural overview used for the T1-T2 table comparison.
+        """
+        return self.request("GET", f"/api/workspaces/{namespace}/{name}/entities").json()
+
 
 def workspace_auth_domains(workspace: dict) -> list[str]:
     """Extract the auth-domain group names from a workspace response (for QC verification)."""
