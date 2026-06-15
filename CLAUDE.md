@@ -14,7 +14,9 @@ resolution), `auth` (ADC per tier + identity guard), `azul_auth` (Azul token cap
 manifest → Rawls `createWorkspace` → Firecloud `importJob` → **QC** (AW-vs-snapshot table comparison +
 auth-domain verification). Separately, **`compare-ingest`** covers the upstream `ADSW → TDR` step
 (submitter workspace vs TDR snapshot; table presence + exact row-count parity, driven from the
-submitter side) — the ingestion-completeness check.
+submitter side) — the ingestion-completeness check. For deployment, a code-only **Docker image**
+(`Dockerfile`) plus three **womtool-validated WDL** wrappers (`wdl/{qc,compare,compare_ingest}.wdl`)
+run the same CLI non-interactively in Terra — see [`wdl/README.md`](wdl/README.md).
 
 **Status of the implementation:**
 - ✅ Unit tests pass (`pytest`, mocked HTTP) and `ruff` is clean.
