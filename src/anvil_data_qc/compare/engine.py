@@ -14,7 +14,7 @@ docs/comparison.md):
 from __future__ import annotations
 
 from .profile import ComparisonProfile
-from .report import ComparisonReport, TableComparison
+from .report import ComparisonReport, CoverageReport, CoverageRow, TableComparison
 from .sources import TableShape, TabularDataSource
 
 
@@ -76,4 +76,42 @@ def run_comparison(
         profile,
         reference_label=reference.label,
         candidate_label=candidate.label,
+    )
+
+
+def compare_coverage(
+    reference: dict[str, TableShape],
+    candidate: dict[str, TableShape],
+    *,
+    reference_label: str,
+    candidate_label: str,
+) -> CoverageReport:
+    """Coverage comparison for ingestion QC (submitter/ADSW workspace -> TDR snapshot).
+
+    Driven entirely from the **reference** (submitter) table set: every submitter table must appear in
+    the **candidate** (TDR) with an *equal* row count. Candidate tables with no reference counterpart --
+    the harmonized ``anvil_*`` Findability Subset, ``file_inventory``, ``workspace_attributes``,
+    ``datarepo_row_ids`` -- are out of scope (reported as a list, never a failure). This is a different
+    semantic from ``compare_inventories``: a one-directional *subset* check, not a strict bijection.
+    """
+    rows: list[CoverageRow] = []
+    for name in sorted(reference):
+        r = reference[name]
+        c = candidate.get(name)
+        in_candidate = c is not None
+        rows.append(
+            CoverageRow(
+                name=name,
+                in_candidate=in_candidate,
+                reference_rows=r.row_count,
+                candidate_rows=c.row_count if c else None,
+                row_ok=bool(in_candidate and r.row_count == c.row_count),
+            )
+        )
+    out_of_scope = sorted(set(candidate) - set(reference))
+    return CoverageReport(
+        reference_label=reference_label,
+        candidate_label=candidate_label,
+        tables=rows,
+        out_of_scope_candidate_tables=out_of_scope,
     )

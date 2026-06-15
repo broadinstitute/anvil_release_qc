@@ -58,6 +58,44 @@ anvil-data-qc compare \
 
 It prints the report and exits non-zero on failure (for batch/WDL gating).
 
+## Ingestion QC (ADSW → TDR): `compare-ingest`
+
+The earliest and most fundamental QC of the pipeline checks the **first** hop —
+`Submitter Workspace (ADSW) → TDR Snapshot` — to confirm that **every table the submitter provided was
+ingested into the system of record** with the same row count. (TDR is the system of record; the
+submitter workspace is the reference here.) This is typically run **repeatedly**, as submitters add
+missing data and correct prior submissions.
+
+It compares the submitter (ADSW) workspace (read from **Rawls**) to the TDR snapshot (read from
+**BigQuery**), **driven from the submitter side**:
+
+| Check | Rule |
+|---|---|
+| **Table coverage** | every submitter table has a same-named TDR table (a *missing* one = **not ingested** = fail). |
+| **Row counts** | submitter row count **==** TDR row count, per table (exact, 1:1). |
+
+TDR's additional tables — the harmonized **`anvil_*` Findability Subset**, `file_inventory`,
+`workspace_attributes`, and the `datarepo_row_ids` system table — have no submitter counterpart and are
+**out of scope by construction** (the comparison only iterates the submitter's table set, so it stays
+correct as the FSS schema grows). There is **no PFB export** in this flow — no Azul, no signed URL, no
+consent gate; it reads table/row counts only.
+
+```bash
+anvil-data-qc compare-ingest \
+  --submitter-workspace-namespace <terra-billing-project> \
+  --submitter-workspace-name <submitter-workspace-name> \
+  --snapshot-id <tdr-snapshot-id> \
+  --tier dev
+```
+
+It prints the report and exits non-zero on failure (for batch/WDL gating).
+
+**Scope now / deferred:** like the AW comparison, this starts at **counts** — table presence + exact
+row-count parity. **Column comparison is a deliberate fast-follow**: ingestion maps/harmonizes the
+submitter's columns into the FSS, so the column rule is best designed against real column data to avoid
+false positives. Row *identity* (T3) and cell values (T4) remain deferred. **→ Until columns are
+compared, confirm that the submitter columns you care about are present in TDR.**
+
 ## Limitations & where human review matters most
 
 This tier is a **count-level** check: deliberately conservative — it won't cry wolf — but it does

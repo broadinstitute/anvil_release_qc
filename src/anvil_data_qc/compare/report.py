@@ -92,3 +92,69 @@ class ComparisonReport:
                 f"  excluded — import-added AW tables (no TDR counterpart): {self.import_added_aw_tables}"
             )
         return "\n".join(lines)
+
+
+@dataclass(frozen=True)
+class CoverageRow:
+    """One submitter (ADSW) table's coverage in TDR: present, and row-count parity."""
+
+    name: str
+    in_candidate: bool
+    reference_rows: int
+    candidate_rows: Optional[int]
+    row_ok: bool
+
+    @property
+    def passed(self) -> bool:
+        return self.in_candidate and self.row_ok
+
+    def status_label(self) -> str:
+        if not self.in_candidate:
+            return "MISSING from TDR (not ingested)"
+        if not self.row_ok:
+            return "row-count mismatch"
+        return "OK"
+
+
+@dataclass(frozen=True)
+class CoverageReport:
+    """Ingestion-coverage result: every submitter (ADSW) table vs the TDR snapshot.
+
+    Driven from the submitter side -- TDR's harmonized ``anvil_*`` / ``file_inventory`` /
+    ``workspace_attributes`` / ``datarepo_row_ids`` tables have no submitter counterpart and are
+    reported as out-of-scope, never as failures.
+    """
+
+    reference_label: str  # the submitter workspace
+    candidate_label: str  # the TDR snapshot (BigQuery)
+    tables: list[CoverageRow]
+    out_of_scope_candidate_tables: list[str]
+
+    @property
+    def passed(self) -> bool:
+        return all(t.passed for t in self.tables)
+
+    def failures(self) -> list[CoverageRow]:
+        return [t for t in self.tables if not t.passed]
+
+    def render(self) -> str:
+        lines = [
+            f"Ingestion comparison — {'PASS' if self.passed else 'FAIL'} "
+            f"({len(self.tables)} submitter tables checked, {len(self.failures())} failing)",
+            f"  reference (submitter): {self.reference_label}",
+            f"  candidate (TDR):       {self.candidate_label}",
+        ]
+        for t in self.tables:
+            mark = "OK " if t.passed else "XX "
+            lines.append(
+                f"    {mark} {t.name:<26} "
+                f"rows {_n(t.reference_rows):>8} -> {_n(t.candidate_rows):<8} "
+                f"{t.status_label()}"
+            )
+        if self.out_of_scope_candidate_tables:
+            lines.append(
+                f"  out of scope — {len(self.out_of_scope_candidate_tables)} TDR tables with no "
+                f"submitter counterpart (FSS / system, not checked): "
+                f"{self.out_of_scope_candidate_tables}"
+            )
+        return "\n".join(lines)

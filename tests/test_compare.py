@@ -1,7 +1,7 @@
 """Unit tests for the comparison engine, source helpers, and auth-domain check (no network)."""
 
 from anvil_data_qc.compare.authdomain import check_auth_domain
-from anvil_data_qc.compare.engine import compare_inventories
+from anvil_data_qc.compare.engine import compare_coverage, compare_inventories
 from anvil_data_qc.compare.profile import ComparisonProfile
 from anvil_data_qc.compare.sources import TableShape, build_nonempty_query, parse_entity_metadata
 
@@ -122,6 +122,64 @@ def test_import_added_aw_table_ignored():
     assert "duos_dataset_registration" in report.import_added_aw_tables
     assert "duos_dataset_registration" not in report.tdr_system_tables
     assert all(t.name != "duos_dataset_registration" for t in report.tables)
+
+
+# --- compare_coverage (ingestion QC: submitter workspace -> TDR) ---
+
+
+def _coverage(reference, candidate):
+    return compare_coverage(
+        reference, candidate, reference_label="submitter workspace", candidate_label="TDR"
+    )
+
+
+def test_ingest_coverage_all_pass():
+    # The prod 1000G submitter tables; TDR has them 1:1 plus the harmonized anvil_*/file_inventory/etc.
+    submitter = {
+        "participant": _shape(3202, 0),
+        "pedigree": _shape(3202, 0),
+        "qc_result_sample": _shape(3184, 0),
+        "sample": _shape(3202, 0),
+        "sample_set": _shape(2, 0),
+    }
+    tdr = dict(submitter)  # same names + row counts on the TDR side
+    tdr.update(
+        {
+            "anvil_activity": _shape(25863, 0),
+            "anvil_file": _shape(26016, 0),
+            "file_inventory": _shape(26016, 0),
+            "workspace_attributes": _shape(24, 0),
+            "datarepo_row_ids": _shape(100000, 0),
+        }
+    )
+    report = _coverage(submitter, tdr)
+    assert report.passed
+    assert len(report.tables) == 5  # driven from the submitter side
+    assert {"anvil_activity", "datarepo_row_ids"} <= set(report.out_of_scope_candidate_tables)
+
+
+def test_ingest_missing_table_fails():
+    submitter = {"participant": _shape(10, 0), "pedigree": _shape(7, 0)}
+    tdr = {"participant": _shape(10, 0)}  # pedigree never ingested
+    report = _coverage(submitter, tdr)
+    assert not report.passed
+    ped = next(t for t in report.tables if t.name == "pedigree")
+    assert not ped.in_candidate and "MISSING from TDR" in ped.status_label()
+
+
+def test_ingest_row_count_mismatch_fails():
+    report = _coverage({"sample": _shape(3202, 0)}, {"sample": _shape(3201, 0)})
+    assert not report.passed
+    assert not report.tables[0].row_ok
+    assert "row-count mismatch" in report.tables[0].status_label()
+
+
+def test_ingest_render_smoke():
+    out = _coverage(
+        {"sample": _shape(2, 0)}, {"sample": _shape(2, 0), "anvil_file": _shape(9, 0)}
+    ).render()
+    assert "Ingestion comparison — PASS" in out
+    assert "out of scope" in out
 
 
 # --- auth domain ---

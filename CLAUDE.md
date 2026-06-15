@@ -9,9 +9,12 @@ validated against dev**. The package `src/anvil_data_qc/` provides: `config` (YA
 resolution), `auth` (ADC per tier + identity guard), `azul_auth` (Azul token capture/validation),
 `logging_setup`, `clients/` (base + `tdr`, `azul`, `rawls`, `firecloud`, `sam`), `bigquery`,
 `workspace` (naming), `compare/` (the comparison seams: `sources`, `profile`, `engine`, `report`,
-`authdomain`, `qc`), `pipeline` (the wired flow), and `cli` (Typer: `qc`, `compare`, `azul-login`).
-The pipeline runs TDR → BigQuery `dataset_id` → Azul manifest → Rawls `createWorkspace` → Firecloud
-`importJob` → **QC** (AW-vs-snapshot table comparison + auth-domain verification).
+`authdomain`, `qc`, and `ingest`), `pipeline` (the wired flow), and `cli` (Typer: `qc`, `compare`,
+`compare-ingest`, `azul-login`). The export/import pipeline runs TDR → BigQuery `dataset_id` → Azul
+manifest → Rawls `createWorkspace` → Firecloud `importJob` → **QC** (AW-vs-snapshot table comparison +
+auth-domain verification). Separately, **`compare-ingest`** covers the upstream `ADSW → TDR` step
+(submitter workspace vs TDR snapshot; table presence + exact row-count parity, driven from the
+submitter side) — the ingestion-completeness check.
 
 **Status of the implementation:**
 - ✅ Unit tests pass (`pytest`, mocked HTTP) and `ruff` is clean.
