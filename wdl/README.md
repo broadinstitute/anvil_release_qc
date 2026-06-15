@@ -28,6 +28,9 @@ gcloud auth configure-docker us-central1-docker.pkg.dev   # let docker push to G
 scripts/publish-image.sh             # or pass an explicit tag: scripts/publish-image.sh 0.1.1
 ```
 
+The script builds for **`linux/amd64`** (Terra/Cromwell's platform), so publishing from an Apple
+Silicon (arm64) Mac still produces a Terra-compatible image.
+
 **Grant Terra read access (private repo).** Terra runs each workflow as a per-user *pet service
 account*; for Cromwell to pull a private image, that identity needs `reader` on the repo. Replace
 `<TERRA_IDENTITY>` with your pet service account or proxy group (see Terra's "import a Docker image
