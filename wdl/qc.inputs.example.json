@@ -4,5 +4,5 @@
   "Qc.tier": "prod",
   "Qc.catalog": "anvil14",
   "Qc.dry_run": false,
-  "Qc.docker": "REPLACE_WITH_REGISTRY/anvil-data-qc:0.1.0"
+  "Qc.docker": "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.1.0"
 }
