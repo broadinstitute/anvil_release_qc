@@ -8,7 +8,7 @@
 ## Table of contents
 
 - [Overview](#overview)
-- [Purpose — why it exists](#purpose--why-it-exists)
+- [Purpose](#purpose)
 - [What it does](#what-it-does)
 - [Who this is for — start here](#who-this-is-for--start-here)
 - [Using it (quickstart)](#using-it-quickstart)
@@ -37,7 +37,7 @@ ADSW  ──ingestion──▶  TDR  ──indexing──▶  ADE  ──PFB exp
 `anvil-data-qc` verifies each hop of this pipeline automatically, so a release can be trusted
 end-to-end.
 
-## Purpose — why it exists
+## Purpose
 
 With hundreds of datasets, release verification done by hand doesn't scale — and the stakes are high:
 data can be **silently lost** between systems, and **controlled-access metadata must stay protected**.
@@ -111,6 +111,13 @@ anvil-data-qc compare-ingest \
   --tier prod
 ```
 
+**Full release QC — export a snapshot to a new workspace and verify it:**
+
+```bash
+anvil-data-qc qc --snapshot-id <tdr-snapshot-id> --tier prod --catalog anvil14
+#   add --dry-run to validate the export side only (no workspace created, no import run)
+```
+
 **Re-check an existing Analysis Workspace against its snapshot:**
 
 ```bash
@@ -118,13 +125,6 @@ anvil-data-qc compare \
   --snapshot-id <tdr-snapshot-id> \
   --workspace-namespace <billing-project> --workspace-name <workspace-name> \
   --tier prod
-```
-
-**Full release QC — export a snapshot to a new workspace and verify it:**
-
-```bash
-anvil-data-qc qc --snapshot-id <tdr-snapshot-id> --tier prod --catalog anvil14
-#   add --dry-run to validate the export side only (no workspace created, no import run)
 ```
 
 Every command exits **`0` on PASS** and **non-zero on failure**, so it gates cleanly in scripts and
@@ -149,14 +149,19 @@ Ingestion comparison — PASS (5 submitter tables checked, 0 failing)
 
 ## What it checks — and what it doesn't
 
-**Checked now (tiers 1–2, count-level):** table **parity**, **row counts**, **column-count sanity**,
-and — for the release flow — the **authorization domain**. Expected differences are normalized away so
-they don't cause false failures: empty source tables/columns Terra drops on import, TDR system tables
-(`datarepo_row_ids`), and import-added tables (the DUOS registration record).
+The comparison is organized into **four tiers of increasing depth**:
 
-**Not yet checked (deliberately deferred):** specific column *identity*, row *identity*, and cell
-*values*. Equal counts do not prove the *same* rows or values are present — so for high-stakes
-datasets, **human review still matters**.
+- **T1 — Table parity** *(now)* — every expected table is present (1:1).
+- **T2 — Row & column counts** *(now)* — row counts match per table, and no column is dropped.
+- **T3 — Row identity** *(deferred)* — the *same* rows are present (id-set parity).
+- **T4 — Cell values** *(deferred)* — cell-by-cell value comparison.
+
+The release flow additionally verifies the **authorization domain**. Expected differences are
+normalized away so they don't cause false failures: empty source tables/columns Terra drops on import,
+TDR system tables (`datarepo_row_ids`), and import-added tables (the DUOS registration record).
+
+Because today's checks are **count-level (T1–T2)**, equal counts do not prove the *same* rows or values
+are present — so for high-stakes datasets, **human review still matters**.
 
 → Full detail, the normalizations, and the **"Limitations & where human review matters most"** list:
 **[`docs/comparison.md`](docs/comparison.md)**.
