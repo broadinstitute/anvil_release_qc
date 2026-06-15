@@ -24,10 +24,10 @@ cd "$(dirname "$0")/.."
 TAG="${1:-$(grep -m1 '^version = ' pyproject.toml | cut -d'"' -f2)}"
 REF="${REGION}-docker.pkg.dev/${PROJECT}/${REPO}/${IMAGE}:${TAG}"
 
-echo "Building ${REF} ..."
-docker build -t "${REF}" .
-
-echo "Pushing ${REF} ..."
-docker push "${REF}"
+# Terra/Cromwell hosts are linux/amd64, so always build for that platform -- otherwise an image built
+# on an Apple Silicon (arm64) machine fails in Terra with "exec format error". `buildx ... --push`
+# builds and pushes atomically; a separate `docker push` can silently no-op and leave a stale tag.
+echo "Building and pushing ${REF} (linux/amd64, for Terra/Cromwell) ..."
+docker buildx build --platform linux/amd64 -t "${REF}" --push .
 
 echo "Done: ${REF}"

@@ -32,10 +32,10 @@ COPY pyproject.toml README.md LICENSE ./
 COPY src ./src
 RUN pip install --no-deps .
 
-# 3) Run as a non-root user.
-RUN useradd --create-home --uid 1000 appuser
-USER appuser
-WORKDIR /home/appuser
+# Run as root. Terra/Cromwell wraps each task and creates a /cromwell_root symlink at the container
+# root (which requires write access to /), so WDL task images must run as root -- a non-root USER
+# fails with: ln: failed to create symbolic link '/cromwell_root': Permission denied. The image is
+# ephemeral, runs in a per-task isolated VM, and carries no secrets (see the header).
 
 ENTRYPOINT ["anvil-data-qc"]
 CMD ["--help"]
