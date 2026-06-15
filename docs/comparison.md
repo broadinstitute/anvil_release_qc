@@ -31,7 +31,13 @@ failures:
   **non-empty** tables (row count > 0) and **non-empty** columns (≥1 non-null value; for arrays, ≥1
   non-empty array). Empty TDR tables are *expected* to be absent from the AW.
 - **TDR system tables are excluded.** Every snapshot carries a `datarepo_row_ids` plumbing table that
-  is intentionally never exported; it (and anything in `ComparisonProfile.ignore_tables`) is skipped.
+  is intentionally never exported; it (and anything in `ComparisonProfile.tdr_system_tables`) is skipped.
+- **Import-added AW tables are excluded.** The PFB/ADE import synthesizes a few workspace entity types
+  that have **no TDR-snapshot counterpart** — e.g. `duos_dataset_registration`, the DUOS (Data Use
+  Oversight System) registration record (columns all `pfb:`-prefixed), present for DUOS-registered
+  datasets. These (`ComparisonProfile.import_added_aw_tables`) are skipped; otherwise strict 1:1 parity
+  would flag them as unexpected "AW-only" tables. The report names the two exclusion categories — TDR
+  system tables vs import-added AW tables — separately, by provenance.
 - **Column renames/additions are tolerated by the count check.** Terra prefixes attributes with
   `pfb:`, derives the entity id as `<entitytype>_id`, adds **reference** columns from the snapshot's
   foreign keys, and surfaces file references as `drs_uri`. Column *names* are not compared in this
