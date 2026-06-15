@@ -1,6 +1,9 @@
 """Command-line entrypoint (Typer).
 
-anvil-data-qc qc --snapshot-id <tdr-snapshot-id> [--tier dev|prod] [--config path]
+anvil-data-qc qc --snapshot-id <id> [--tier dev|prod] [--catalog <cat>] [--dry-run] [--config path]
+anvil-data-qc compare --snapshot-id <id> --workspace-namespace <ns> --workspace-name <name> [...]
+anvil-data-qc compare-ingest --submitter-workspace-namespace <ns> --submitter-workspace-name <name> \
+    --snapshot-id <id> [--tier dev|prod] [--config path]
 anvil-data-qc azul-login [--tier dev|prod] [--config path] [--from-curl] [--no-open]
 """
 
@@ -22,6 +25,7 @@ from .azul_auth import (
     write_azul_token,
 )
 from .clients.tdr import TdrClient, snapshot_bigquery_access
+from .compare.ingest import run_ingest_comparison
 from .compare.qc import run_qc_comparison
 from .config import load_config, resolve_tier
 from .pipeline import run_qc
@@ -130,6 +134,62 @@ def compare(
         raise typer.Exit(2) from exc
     typer.echo(result.render())
     raise typer.Exit(0 if result.passed else 1)
+
+
+@app.command("compare-ingest")
+def compare_ingest(
+    submitter_workspace_namespace: str = typer.Option(
+        ..., "--submitter-workspace-namespace", help="Submitter (ADSW) workspace namespace."
+    ),
+    submitter_workspace_name: str = typer.Option(
+        ..., "--submitter-workspace-name", help="Submitter (ADSW) workspace name."
+    ),
+    snapshot_id: str = typer.Option(
+        ...,
+        "--snapshot-id",
+        "-s",
+        help="TDR snapshot id (the system of record to compare against).",
+    ),
+    tier: Optional[str] = typer.Option(
+        None, "--tier", "-t", help="Tier (dev|prod). Defaults to the config's default_tier."
+    ),
+    config: Path = typer.Option(
+        Path("config/config.yaml"), "--config", "-c", help="Path to the YAML config file."
+    ),
+) -> None:
+    """Compare a submitter (ADSW) workspace's tables to the TDR snapshot (ingestion QC).
+
+    Verifies the ADSW -> TDR step: every table the submitter provided was ingested into TDR with the
+    same row count. Driven from the submitter workspace; TDR's harmonized anvil_* / file_inventory /
+    workspace_attributes tables are out of scope. No PFB export (no Azul / signed URL / consent gate).
+    Exits non-zero if any submitter table is missing from TDR or has a row-count mismatch.
+    """
+    cfg = load_config(config)
+    resolved = resolve_tier(cfg, tier)
+    creds = credentials_for_tier(resolved)
+    assert_tier_identity(creds, resolved)
+
+    def google_token() -> str:
+        return bearer_token(creds)
+
+    try:
+        snapshot = TdrClient(resolved.url("tdr"), google_token).retrieve_snapshot(snapshot_id)
+        bq_project, bq_dataset = snapshot_bigquery_access(snapshot)
+        report = run_ingest_comparison(
+            creds=creds,
+            tier=resolved,
+            bq_project=bq_project,
+            bq_dataset=bq_dataset,
+            submitter_namespace=submitter_workspace_namespace,
+            submitter_workspace_name=submitter_workspace_name,
+            token_provider=google_token,
+        )
+    except SafetyError as exc:
+        # Safety gate (e.g. a bearer-token destination violation; see safety.py). Clean message.
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from exc
+    typer.echo(report.render())
+    raise typer.Exit(0 if report.passed else 1)
 
 
 @app.command("azul-login")

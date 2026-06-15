@@ -112,13 +112,19 @@ def parse_entity_metadata(metadata: dict) -> dict[str, TableShape]:
 
 
 class RawlsWorkspaceSource(TabularDataSource):
-    """Reads the Analysis Workspace data tables from Rawls (the candidate)."""
+    """Reads a Terra workspace's data tables from Rawls.
 
-    def __init__(self, client: RawlsClient, namespace: str, name: str) -> None:
+    Used both as the *candidate* (an Analysis Workspace, for release QC) and as the *reference* (a
+    submitter/ADSW workspace, for ingestion QC) -- pass ``label`` to describe its role in the report.
+    """
+
+    def __init__(
+        self, client: RawlsClient, namespace: str, name: str, *, label: str | None = None
+    ) -> None:
         self.client = client
         self.namespace = namespace
         self.name = name
-        self.label = f"AW {namespace}/{name}"
+        self.label = label or f"AW {namespace}/{name}"
 
     def table_inventory(self) -> dict[str, TableShape]:
         return parse_entity_metadata(self.client.entity_type_metadata(self.namespace, self.name))
