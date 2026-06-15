@@ -4,19 +4,43 @@ The same code that runs locally and in notebooks ships as a Docker image and run
 Terra via the WDL workflows here. The image is **code-only** — no config, no secrets; everything
 sensitive is supplied at run time.
 
-## 1. Build and push the image
+## 1. Publish the image to Google Artifact Registry (GAR)
 
-```bash
-# From the repo root:
-docker build -t anvil-data-qc:0.1.0 .
+The image is published to GAR and referenced by the workflows below:
 
-# Tag + push to a registry the Terra runtime service account can pull (GCR or Artifact Registry):
-REG=us-central1-docker.pkg.dev/PROJECT/REPO        # <-- your registry
-docker tag  anvil-data-qc:0.1.0 "$REG/anvil-data-qc:0.1.0"
-docker push                     "$REG/anvil-data-qc:0.1.0"
+```
+us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:<tag>
 ```
 
-Pass that image reference as the `docker` input to each workflow.
+**One-time setup** (per project):
+
+```bash
+gcloud services enable artifactregistry.googleapis.com --project dsp-sa-development
+gcloud artifacts repositories create anvil-qc \
+  --repository-format=docker --location=us-central1 --project=dsp-sa-development \
+  --description="anvil-data-qc images"
+gcloud auth configure-docker us-central1-docker.pkg.dev   # let docker push to GAR
+```
+
+**Build and push** (tag defaults to the `pyproject.toml` version):
+
+```bash
+scripts/publish-image.sh             # or pass an explicit tag: scripts/publish-image.sh 0.1.1
+```
+
+**Grant Terra read access (private repo).** Terra runs each workflow as a per-user *pet service
+account*; for Cromwell to pull a private image, that identity needs `reader` on the repo. Replace
+`<TERRA_IDENTITY>` with your pet service account or proxy group (see Terra's "import a Docker image
+from a private GCR/GAR" docs):
+
+```bash
+gcloud artifacts repositories add-iam-policy-binding anvil-qc \
+  --location=us-central1 --project=dsp-sa-development \
+  --member="<TERRA_IDENTITY>" --role="roles/artifactregistry.reader"
+```
+
+This published reference is the **default `docker` input** for every workflow, so you only override it
+to run a different tag.
 
 ## 2. The workflows
 

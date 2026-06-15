@@ -19,7 +19,7 @@ workflow Qc {
         String? tier
         String? catalog
         Boolean dry_run = false
-        String docker
+        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.1.0"
     }
 
     call qc {
