@@ -55,13 +55,14 @@ def compare_inventories(
             )
         )
 
-    ignored_present = sorted((set(reference) | set(candidate)) & ignore)
+    present = set(reference) | set(candidate)
     return ComparisonReport(
         reference_label=reference_label,
         candidate_label=candidate_label,
         tables=tables,
         empty_reference_tables=empty_reference,
-        ignored_tables=ignored_present,
+        tdr_system_tables=sorted(present & profile.tdr_system_tables),
+        import_added_aw_tables=sorted(present & profile.import_added_aw_tables),
     )
 
 

@@ -53,7 +53,9 @@ class ComparisonReport:
     candidate_label: str
     tables: list[TableComparison]
     empty_reference_tables: list[str]  # 0-row TDR tables, excluded (expected import drop)
-    ignored_tables: list[str]  # TDR system tables, excluded
+    tdr_system_tables: list[str]  # TDR-only internals, excluded (e.g. datarepo_row_ids)
+    # AW-only import artifacts, excluded (e.g. duos_dataset_registration)
+    import_added_aw_tables: list[str]
 
     @property
     def passed(self) -> bool:
@@ -81,6 +83,12 @@ class ComparisonReport:
             lines.append(
                 f"  excluded — empty TDR tables (expected drop): {self.empty_reference_tables}"
             )
-        if self.ignored_tables:
-            lines.append(f"  excluded — TDR system tables: {self.ignored_tables}")
+        if self.tdr_system_tables:
+            lines.append(
+                f"  excluded — TDR system tables (TDR-only internals): {self.tdr_system_tables}"
+            )
+        if self.import_added_aw_tables:
+            lines.append(
+                f"  excluded — import-added AW tables (no TDR counterpart): {self.import_added_aw_tables}"
+            )
         return "\n".join(lines)

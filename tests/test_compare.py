@@ -108,8 +108,20 @@ def test_system_table_ignored():
     ref = {"t": _shape(10, 3, 3), "datarepo_row_ids": _shape(100317, 2, 2)}
     report = _compare(ref, {"t": _shape(10, 3)})
     assert report.passed
-    assert "datarepo_row_ids" in report.ignored_tables
+    assert "datarepo_row_ids" in report.tdr_system_tables
     assert all(t.name != "datarepo_row_ids" for t in report.tables)
+
+
+def test_import_added_aw_table_ignored():
+    # duos_dataset_registration is synthesized by the PFB/ADE import (AW-only, no TDR counterpart).
+    # It must be excluded -- not flagged AW-ONLY -- and reported under its own provenance category.
+    ref = {"t": _shape(10, 3, 3)}
+    cand = {"t": _shape(10, 3), "duos_dataset_registration": _shape(1, 5)}
+    report = _compare(ref, cand)
+    assert report.passed
+    assert "duos_dataset_registration" in report.import_added_aw_tables
+    assert "duos_dataset_registration" not in report.tdr_system_tables
+    assert all(t.name != "duos_dataset_registration" for t in report.tables)
 
 
 # --- auth domain ---
