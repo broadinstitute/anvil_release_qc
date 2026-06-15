@@ -1,0 +1,8 @@
+{
+  "Qc.config": "gs://your-bucket/anvil-data-qc/config.yaml",
+  "Qc.snapshot_id": "e8dacaea-d37d-48e5-b0a9-c88777753423",
+  "Qc.tier": "prod",
+  "Qc.catalog": "anvil14",
+  "Qc.dry_run": false,
+  "Qc.docker": "REPLACE_WITH_REGISTRY/anvil-data-qc:0.1.0"
+}
