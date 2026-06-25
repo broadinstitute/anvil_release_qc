@@ -41,7 +41,7 @@ from .logging_setup import LOGGER_NAME, setup_logging, write_header
 from .safety import (
     SIGNED_URL_ALLOWED_PREFIXES,
     ControlledAccessNotApprovedError,
-    assert_open_access,
+    assert_consent_permitted,
     verify_pfb_handoff,
 )
 from .timing import stage_timer
@@ -57,11 +57,17 @@ def run_qc(
     log_dir: Path = Path("logs"),
     dry_run: bool = False,
     catalog: Optional[str] = None,
+    allow_controlled_access: bool = False,
+    azul_token_file: Optional[str] = None,
 ) -> dict:
     """Run the export/import flow for one TDR snapshot. Returns the created workspace + log path.
 
     ``dry_run`` stops after Azul returns the signed URL (steps 1-3) -- no workspace is created and no
     import is run -- to validate the export side with zero side effects.
+
+    ``allow_controlled_access`` opts in to running on non-open-access snapshots (default off = fail
+    closed, open-access only; see ``safety.assert_consent_permitted``). ``azul_token_file`` overrides
+    the tier's configured Azul token path (used by the WDL to pass a localized token file).
     """
     config = load_config(config_path)
     tier = resolve_tier(config, tier_name)
@@ -85,7 +91,7 @@ def run_qc(
     # Azul token: read + validate up front (fail fast before any TDR/BigQuery work). Azul rejects
     # gcloud ADC tokens, so it needs its own interactive access token (see `azul-login`). With no
     # token configured, Azul is called anonymously -- open-access datasets only.
-    azul_token = read_azul_token(tier)
+    azul_token = read_azul_token(tier, override_path=azul_token_file)
     if azul_token is None:
         logger.info(
             "No Azul token configured (azul_token_file unset/empty); calling Azul without a token "
@@ -109,18 +115,30 @@ def run_qc(
     snapshot = tdr.retrieve_snapshot(snapshot_id)
     name = snapshot_name(snapshot)
 
-    # SAFETY GATE: only explicitly open-access snapshots may proceed. The Azul PFB signed URL grants
-    # direct access to an NIH study's controlled-access tabular data; mishandling it (e.g. importing a
-    # prod signed URL into the insecure dev tier) is a Federal Data Management Incident. This pipeline
-    # is NOT yet approved for controlled-access data (pending security review), so anything other than
-    # an explicit "NRES" consentCode is blocked here -- before any signed URL is generated. See safety.py.
+    # SAFETY GATE (layer 1): only explicitly open-access snapshots proceed UNLESS controlled-access was
+    # explicitly authorized for this run (allow_controlled_access). The Azul PFB signed URL grants direct
+    # access to an NIH study's controlled-access data; mishandling it (e.g. a prod URL into the insecure
+    # dev tier) is a Federal Data Management Incident. Controlled-access is security-team approved but
+    # gated behind the explicit opt-in; layers 2-4 (containment, hand-off, bearer-pin) apply regardless.
     consent_code = snapshot_consent_code(snapshot)
     try:
-        assert_open_access(snapshot_id, consent_code)
+        controlled = assert_consent_permitted(
+            snapshot_id, consent_code, allow_controlled_access=allow_controlled_access
+        )
     except ControlledAccessNotApprovedError as exc:
         logger.error("%s", exc)
         raise
-    logger.info("Consent gate OK: snapshot is open-access (consentCode=%r).", consent_code)
+    if controlled:
+        logger.warning(
+            "CONTROLLED-ACCESS run AUTHORIZED (allow_controlled_access=True): snapshot %s, "
+            "consentCode=%r, tier %s. The PFB signed URL grants direct controlled-data access; "
+            "hand-off verification and bearer-pinning still apply.",
+            snapshot_id,
+            consent_code,
+            tier.name,
+        )
+    else:
+        logger.info("Consent gate OK: snapshot is open-access (consentCode=%r).", consent_code)
 
     bq_project, bq_dataset = snapshot_bigquery_access(snapshot)
     logger.info("Snapshot '%s' -> BigQuery %s.%s", name, bq_project, bq_dataset)

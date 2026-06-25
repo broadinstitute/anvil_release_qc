@@ -66,6 +66,16 @@ def qc(
         "--dry-run",
         help="Validate the export side only (TDR -> BigQuery -> Azul); create no workspace, run no import.",
     ),
+    allow_controlled_access: bool = typer.Option(
+        False,
+        "--allow-controlled-access",
+        help="Opt in to controlled-access snapshots (any consentCode). Default off = open-access only.",
+    ),
+    azul_token_file: Optional[str] = typer.Option(
+        None,
+        "--azul-token-file",
+        help="Path to an Azul token file, overriding the tier's azul_token_file (used by the WDL).",
+    ),
 ) -> None:
     """Run the export/import + QC flow for one TDR snapshot."""
     try:
@@ -75,6 +85,8 @@ def qc(
             config_path=config,
             dry_run=dry_run,
             catalog=catalog,
+            allow_controlled_access=allow_controlled_access,
+            azul_token_file=azul_token_file,
         )
     except SafetyError as exc:
         # Safety gate (consent / signed-URL hand-off; see safety.py). Clean message, no traceback.
