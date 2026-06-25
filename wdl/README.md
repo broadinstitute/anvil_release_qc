@@ -62,9 +62,24 @@ Each has a matching `*.inputs.example.json`. Fill in `config`, the workspace/sna
   workflow's runtime service account**.
 - **`config` is a File input** — the same `config.yaml` the CLI uses, with **`adc_credentials_file: null`**
   so ADC falls back to that runtime identity. Store it in a bucket and pass its `gs://` path.
-- **`qc` is open-access only**: Azul is queried anonymously (the consent gate enforces
-  `consentCode == "NRES"`), so **no Azul token is needed**. Controlled-access support (and a token
-  input) is deferred until after the security review. `compare` / `compare-ingest` never touch Azul.
+- **`qc` is open-access by default**: Azul is queried anonymously (the consent gate enforces
+  `consentCode == "NRES"`), so **no Azul token is needed**. `compare` / `compare-ingest` never touch Azul.
+
+### Controlled-access (`qc` only)
+
+Controlled-access is **security-team approved** (no restrictions — all AnVIL data) and gated behind an
+explicit, default-off opt-in. To QC a controlled-access snapshot:
+
+1. **Mint a fresh Azul token** locally: `anvil-data-qc azul-login --tier prod` (controlled data needs a
+   token; it lasts ~1 h).
+2. **Upload the token file to a secure bucket**, e.g. `gs://fc-secure-…/azul-token-prod.txt`.
+3. **Set two `qc.wdl` inputs:** `allow_controlled_access = true` and `azul_token` = that `gs://` token
+   file. The run then permits any `consentCode` and logs a controlled-access audit `WARNING`.
+
+**Batch + token timing:** the token is used only at each run's *early manifest step* (the long import
+runs on the auto-refreshing ADC), and each run pre-checks ≥30 min remaining. So launch the data-table
+rows **together, soon after minting the token** (e.g. ~5 at a time) and one fresh token covers the
+batch. Always pass the token as a **File** (never a String input) to keep it out of submission metadata.
 
 ## 4. Outputs & failure triage
 

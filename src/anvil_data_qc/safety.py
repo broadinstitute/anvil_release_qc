@@ -2,16 +2,19 @@
 
 The Azul PFB signed URL grants direct access to **all of an NIH study's controlled-access tabular
 data**. Mishandling it -- e.g. importing a production signed URL into the insecure dev tier, or any
-unintended destination -- would be a Federal Data Management Incident (DMI). This pipeline is **NOT
-yet approved** for controlled-access data; that approval requires a security-team review of the
-end-to-end flow.
+unintended destination -- would be a Federal Data Management Incident (DMI). Controlled-access use was
+**reviewed and approved by the Broad security team** (no restrictions -- approved for all AnVIL data);
+it is gated behind an explicit, default-off opt-in (``allow_controlled_access``), so the default stays
+fail-closed and every controlled-access run is a deliberate, audit-logged choice.
 
-This module provides three layers of defense-in-depth (do not weaken any without that review):
+This module provides four layers of defense-in-depth (do not weaken any without security review):
 
-1. **Consent gate** -- the pipeline runs only on **explicitly open-access** snapshots: the TDR
-   snapshot's ``consentCode`` must be exactly ``"NRES"`` (No Restrictions). Fails closed: empty,
+1. **Consent gate** -- by default the pipeline runs only on **explicitly open-access** snapshots: the
+   TDR snapshot's ``consentCode`` must be exactly ``"NRES"`` (No Restrictions). Fails closed: empty,
    missing, differently-cased, or any other value is treated as controlled/unknown and blocked, in
-   every tier, **before any PFB signed URL is generated**.
+   every tier, **before any PFB signed URL is generated**. A controlled-access run must explicitly set
+   ``allow_controlled_access`` (see ``assert_consent_permitted``), which permits any consentCode and
+   emits a controlled-access audit log; layers 2-4 still apply.
 2. **Secret containment** -- the signed URL is wrapped in ``SignedUrl``, which redacts on
    repr/str/format and is not JSON-serializable. The raw value is reachable only via ``.reveal()``,
    called at exactly one site (the importJob POST body), so it cannot leak into logs/exceptions/
@@ -63,10 +66,30 @@ def assert_open_access(snapshot_id: str, consent_code: Optional[str]) -> None:
     if not is_open_access(consent_code):
         raise ControlledAccessNotApprovedError(
             f"Snapshot {snapshot_id} has consentCode={consent_code!r}, not "
-            f"'{OPEN_ACCESS_CONSENT_CODE}' (open-access). This pipeline is NOT yet approved for "
-            "running on controlled-access data -- the flow must be reviewed with the security team "
-            "before any controlled-access use. Aborting before any PFB signed URL is generated."
+            f"'{OPEN_ACCESS_CONSENT_CODE}' (open-access), and controlled-access was not enabled for "
+            "this run. To run on controlled-access data, set allow_controlled_access (the "
+            "--allow-controlled-access CLI flag / WDL input). Aborting before any signed URL is generated."
         )
+
+
+def assert_consent_permitted(
+    snapshot_id: str, consent_code: Optional[str], *, allow_controlled_access: bool
+) -> bool:
+    """Consent gate: decide whether the pipeline may proceed for this snapshot.
+
+    - ``allow_controlled_access=False`` (default): only explicitly open-access snapshots pass --
+      raises ``ControlledAccessNotApprovedError`` unless ``consent_code == "NRES"``.
+    - ``allow_controlled_access=True``: controlled-access was explicitly authorized for this run (the
+      Broad security team approved all AnVIL data), so **any** consentCode is permitted.
+
+    Returns ``True`` when proceeding under controlled-access authorization (the caller must emit the
+    controlled-access audit log), ``False`` for a normal open-access snapshot. Layers 2-4 (signed-URL
+    containment, hand-off verification, bearer-pinning) apply regardless.
+    """
+    if allow_controlled_access:
+        return True
+    assert_open_access(snapshot_id, consent_code)
+    return False
 
 
 # --- Layer 2: secret containment ---

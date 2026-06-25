@@ -172,16 +172,20 @@ A controlled-access PFB **signed URL** grants direct access to an NIH study's co
 mishandling one is a Federal Data Management Incident (DMI). The tool is built **fail-closed** around
 that risk:
 
-1. **Consent gate** — the pipeline proceeds only when the snapshot's `consentCode` is exactly **`NRES`**
-   (open-access); anything else, including empty or unknown, is blocked **before any signed URL is generated**.
+1. **Consent gate** — by default the pipeline proceeds only when the snapshot's `consentCode` is exactly
+   **`NRES`** (open-access); anything else, including empty or unknown, is blocked **before any signed URL
+   is generated**. Controlled-access requires the explicit opt-in below.
 2. **Signed-URL containment** — the PFB signed URL is a guarded value with a single reveal point (the
    import hand-off); it cannot be logged or printed.
 3. **Same-tier hand-off verification** — the signed URL is only ever delivered to the expected,
    same-tier import service and storage bucket.
 4. **Bearer-token host-pinning** — each service token is only ever sent to its own HTTPS host.
 
-**Controlled-access is not yet enabled** — it requires a security-team review of the end-to-end flow
-first. Open-access production datasets (e.g. the 13 currently released) are fully supported today.
+**Controlled-access** was reviewed and **approved by the Broad security team** (no restrictions — all
+AnVIL data). It's enabled by an **explicit, default-off opt-in** — `--allow-controlled-access` (CLI) /
+`allow_controlled_access` (`qc.wdl`) — so the default stays fail-closed (open-access only) and every
+controlled-access run is a deliberate, audit-logged choice; layers 2–4 apply regardless. Controlled
+runs also need an Azul token (the `qc.wdl` `azul_token` input) — see [`wdl/README.md`](wdl/README.md).
 
 → See [`src/anvil_data_qc/safety.py`](src/anvil_data_qc/safety.py) and risk **R8** in
 [`docs/risk_register.md`](docs/risk_register.md).

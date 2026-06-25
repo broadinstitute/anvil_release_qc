@@ -137,17 +137,19 @@ def extract_bearer_token(text: str) -> str:
     )
 
 
-def read_azul_token(tier: ResolvedTier) -> Optional[str]:
-    """Read the tier's Azul access token, or ``None`` if none is configured.
+def read_azul_token(tier: ResolvedTier, *, override_path: Optional[str] = None) -> Optional[str]:
+    """Read the Azul access token, or ``None`` if none is configured.
 
-    Returns ``None`` when ``azul_token_file`` is unset, or the file is empty / only comments (the
-    caller may then call Azul anonymously — open-access only). Otherwise returns the first non-comment,
-    non-blank line (the token). The token is an opaque Google access token, so it is not shape-checked
-    here; ``validate_azul_token`` does the real (tokeninfo) validation.
+    ``override_path`` (e.g. a WDL-localized token file passed via ``--azul-token-file``) takes
+    precedence over the tier's configured ``azul_token_file``. Returns ``None`` when neither is set, or
+    the file is empty / only comments (the caller may then call Azul anonymously — open-access only).
+    Otherwise returns the first non-comment, non-blank line (the token). The token is an opaque Google
+    access token, so it is not shape-checked here; ``validate_azul_token`` does the real validation.
     """
-    if not tier.azul_token_file:
+    token_file = override_path or tier.azul_token_file
+    if not token_file:
         return None
-    path = Path(tier.azul_token_file).expanduser()
+    path = Path(token_file).expanduser()
     if not path.exists():
         raise FileNotFoundError(
             f"Azul token file not found: {path}. Run `anvil-data-qc azul-login`."
