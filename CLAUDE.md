@@ -144,8 +144,9 @@ flow itself is specified in [`docs/export_import_flow.md`](docs/export_import_fl
   path in all three.
 
 **Auth** (see *Two tiers*):
-- Google **ADC** everywhere; **one human Terra user account per tier**, both tiers identical (in a Terra
-  workflow the runtime **pet service account** resolves to this human user via Sam — see the identity guard).
+- Google **ADC** everywhere; **one or more authorized human Terra users per tier** (the tier `email`
+  plus optional `authorized_users` — multi-operator), both tiers identical (in a Terra workflow the
+  runtime **pet service account** resolves to its human user via Sam — see the identity guard).
 - Locally, a per-tier saved ADC file selected via `GOOGLE_APPLICATION_CREDENTIALS`; in deployment,
   ADC falls back to the ambient runtime identity (no code change).
 - The gcloud ADC creds serve **TDR, BigQuery, and Terra** (Rawls/Firecloud): one
@@ -157,9 +158,10 @@ flow itself is specified in [`docs/export_import_flow.md`](docs/export_import_fl
   [`export_import_flow.md`](docs/export_import_flow.md) → Authentication and risk **R7**.
 - **Identity guard:** before any API call, resolve the active credentials to their **canonical Terra
   user** via Sam (`/api/users/v2/self`, which maps a Terra **pet service account** to its owning human
-  user) and assert it equals the configured tier email; abort on mismatch. So the tier `email` is the
-  **human Terra account** in every context (local *and* the Terra/WDL deployment, where the runtime
-  identity is the pet SA) — the raw ADC identity is logged for the audit trail.
+  user) and assert it is in the tier's **authorized set** (`email` ∪ `authorized_users`, supporting
+  multiple operators); abort otherwise. So the configured accounts are **human Terra users** in every
+  context (local *and* the Terra/WDL deployment, where the runtime identity is the pet SA) — the raw ADC
+  identity is logged for the audit trail. The Azul-token check uses the same authorized set.
 - Scopes: plain `gcloud auth application-default login` (defaults `openid`, `email`,
   `cloud-platform`) — no custom scope string.
 

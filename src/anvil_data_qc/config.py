@@ -47,6 +47,9 @@ class TierConfig(BaseModel):
     # The Azul OAuth client id a token must carry as `azp`. Optional: auto-discovered from Azul's
     # served Swagger initializer when unset (so prod's id need not be hardcoded).
     azul_oauth2_client_id: Optional[str] = None
+    # Additional human Terra users authorized to run this tier (multi-operator). The identity guard and
+    # the Azul-token check accept any account in {email} ∪ authorized_users.
+    authorized_users: list[str] = []
 
 
 class AppConfig(BaseModel):
@@ -63,10 +66,16 @@ class ResolvedTier(BaseModel):
     billing_project: str
     azul_token_file: Optional[str]
     azul_oauth2_client_id: Optional[str] = None
+    authorized_users: list[str] = []
     service_urls: dict[str, str]
 
     def url(self, service: str) -> str:
         return self.service_urls[service]
+
+    @property
+    def authorized_emails(self) -> set[str]:
+        """Human Terra users allowed to run this tier (lowercased): ``{email}`` ∪ ``authorized_users``."""
+        return {e.strip().lower() for e in [self.email, *self.authorized_users] if e and e.strip()}
 
 
 def load_config(path: Path) -> AppConfig:
@@ -92,5 +101,6 @@ def resolve_tier(config: AppConfig, tier_name: Optional[str] = None) -> Resolved
         billing_project=tc.billing_project,
         azul_token_file=tc.azul_token_file,
         azul_oauth2_client_id=tc.azul_oauth2_client_id,
+        authorized_users=tc.authorized_users,
         service_urls=SERVICE_URLS[name],
     )

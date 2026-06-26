@@ -103,7 +103,7 @@ def run_qc(
         info = validate_azul_token(
             azul_token,
             expected_azp=expected_client_id(tier),
-            expected_email=tier.email,
+            allowed_emails=tier.authorized_emails,
             min_remaining_seconds=MIN_TOKEN_SECONDS_FOR_RUN,
         )
         logger.info(

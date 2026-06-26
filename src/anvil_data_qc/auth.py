@@ -97,11 +97,12 @@ def terra_user_email(creds: Credentials, sam_url: str) -> str:
 
 
 def assert_tier_identity(creds: Credentials, tier: ResolvedTier) -> str:
-    """Identity guard: abort unless the active credentials' Terra user matches the tier's email.
+    """Identity guard: abort unless the active credentials' Terra user is authorized for the tier.
 
     Resolves the canonical Terra user via Sam (mapping a pet service account to its owning human user)
-    and asserts it equals ``tier.email``. The raw ADC identity (e.g. the pet SA in a Terra workflow) is
-    logged for the audit trail. Returns the resolved Terra-user email.
+    and asserts it is in ``tier.authorized_emails`` (= ``email`` ∪ ``authorized_users``, so multiple
+    operators are supported). The raw ADC identity (e.g. the pet SA in a Terra workflow) is logged for
+    the audit trail. Returns the resolved Terra-user email.
     """
     # Raw ADC account (e.g. the pet SA) -- audit-only now that Sam is the authority, so best-effort:
     # never let this lookup block an otherwise-valid run.
@@ -111,10 +112,11 @@ def assert_tier_identity(creds: Credentials, tier: ResolvedTier) -> str:
         logger.debug("Could not resolve the raw ADC identity for the audit log: %s", exc)
         adc_identity = "unknown"
     terra_user = terra_user_email(creds, tier.url("sam"))
-    if terra_user.lower() != tier.email.lower():
+    if terra_user.lower() not in tier.authorized_emails:
         raise IdentityMismatchError(
-            f"Active Terra user '{terra_user}' (ADC identity '{adc_identity}') does not match the "
-            f"configured '{tier.email}' for tier '{tier.name}'. Refusing to proceed (wrong-tier guard)."
+            f"Active Terra user '{terra_user}' (ADC identity '{adc_identity}') is not authorized for "
+            f"tier '{tier.name}' (authorized: {sorted(tier.authorized_emails)}). Refusing to proceed "
+            "(wrong-tier / unauthorized-user guard)."
         )
     logger.info(
         "Identity guard OK: Terra user %s (ADC identity %s; tier '%s').",
