@@ -58,9 +58,11 @@ Each has a matching `*.inputs.example.json`. Fill in `config`, the workspace/sna
 ## 3. Runtime model (credentials & config)
 
 - **ADC = the ambient Terra runtime service account** (no key file). The CLI identity guard resolves
-  that pet SA to its **owning human Terra user** via Sam (`/api/users/v2/self`) and asserts it equals
-  the configured tier `email` — so **the deployment config's `email` is your human Terra account** (the
-  same value you use locally), *not* the pet service account.
+  that pet SA to its **owning human Terra user** via Sam (`/api/users/v2/self`) and asserts it is one of
+  the tier's authorized users — so **the deployment config's `email` is your human Terra account** (the
+  same value you use locally), *not* the pet service account. For **multiple operators**, list their
+  human accounts under the tier's `authorized_users:` (the guard and the Azul-token check allow any
+  account in `email` ∪ `authorized_users`; each operator mints their own Azul token as themselves).
 - **`config` is a File input** — the same `config.yaml` the CLI uses, with **`adc_credentials_file: null`**
   so ADC falls back to that runtime identity. Store it in a bucket and pass its `gs://` path.
 - **`qc` is open-access by default**: Azul is queried anonymously (the consent gate enforces

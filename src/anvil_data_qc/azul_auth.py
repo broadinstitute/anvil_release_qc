@@ -25,7 +25,7 @@ import logging
 import re
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from typing import Optional
+from typing import Collection, Optional
 
 import requests
 
@@ -89,13 +89,14 @@ def validate_azul_token(
     token: str,
     *,
     expected_azp: str,
-    expected_email: Optional[str] = None,
+    allowed_emails: Optional[Collection[str]] = None,
     min_remaining_seconds: int = 0,
 ) -> dict:
     """Validate an Azul access token the way Azul does; raise ``AzulTokenError`` if it won't work.
 
-    Checks (via ``tokeninfo``): ``azp`` == the Azul OAuth client, optional account ``email`` match,
-    and at least ``min_remaining_seconds`` of life left. Returns the tokeninfo dict on success.
+    Checks (via ``tokeninfo``): ``azp`` == the Azul OAuth client, that the token's account is one of
+    ``allowed_emails`` (when given -- supporting multiple authorized operators), and at least
+    ``min_remaining_seconds`` of life left. Returns the tokeninfo dict on success.
     """
     info = tokeninfo(token)
     azp = info.get("azp")
@@ -105,11 +106,14 @@ def validate_azul_token(
             "Azul will reject it — copy the token from the Azul Swagger UI (it must be issued to "
             "Azul's own client), e.g. via `anvil-data-qc azul-login`."
         )
-    if expected_email and (info.get("email") or "").lower() != expected_email.lower():
-        raise AzulTokenError(
-            f"Token belongs to '{info.get('email')}', not the tier account '{expected_email}'. "
-            "Log in to Azul as the configured account."
-        )
+    if allowed_emails:
+        token_email = (info.get("email") or "").lower()
+        allowed = {e.lower() for e in allowed_emails}
+        if token_email not in allowed:
+            raise AzulTokenError(
+                f"Token belongs to '{info.get('email')}', which is not an authorized account for this "
+                f"tier ({sorted(allowed)}). Log in to Azul as an authorized account."
+            )
     remaining = int(info.get("expires_in", 0))
     if remaining <= min_remaining_seconds:
         raise AzulTokenError(

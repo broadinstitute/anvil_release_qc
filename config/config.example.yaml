@@ -15,6 +15,11 @@ tiers:
     # workflow the runtime pet service account maps back to this human account. Use the human account
     # in every context (local and deployment), NOT a pet service account.
     email: you@test.firecloud.org
+    # Optional: ADDITIONAL human Terra users authorized to run this tier (multi-operator). The identity
+    # guard and the Azul-token check allow any account in {email} ∪ authorized_users; each operator
+    # signs in / mints their own Azul token as themselves.
+    # authorized_users:
+    #   - teammate@broadinstitute.org
     # Saved ADC credentials for this tier. Create with:
     #   gcloud auth application-default login        # signed in as the dev account
     # then copy ~/.config/gcloud/application_default_credentials.json to this path.

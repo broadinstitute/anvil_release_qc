@@ -251,7 +251,9 @@ def azul_login(
 
     try:
         token = extract_bearer_token(raw)
-        info = validate_azul_token(token, expected_azp=client_id, expected_email=resolved.email)
+        info = validate_azul_token(
+            token, expected_azp=client_id, allowed_emails=resolved.authorized_emails
+        )
         path = write_azul_token(resolved, token, info)
     except AzulTokenError as exc:
         typer.secho(f"Token rejected: {exc}", fg=typer.colors.RED, err=True)

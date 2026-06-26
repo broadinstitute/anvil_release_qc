@@ -81,8 +81,17 @@ def test_discover_client_id_not_found(monkeypatch):
 
 def test_validate_ok(monkeypatch):
     monkeypatch.setattr(azul_auth, "tokeninfo", lambda t: _info())
-    info = validate_azul_token("tok", expected_azp=_CLIENT_ID, expected_email=_EMAIL)
+    info = validate_azul_token("tok", expected_azp=_CLIENT_ID, allowed_emails=[_EMAIL])
     assert info["azp"] == _CLIENT_ID
+
+
+def test_validate_allows_any_of_multiple(monkeypatch):
+    # Multi-operator: a token from any account in allowed_emails passes.
+    monkeypatch.setattr(azul_auth, "tokeninfo", lambda t: _info(email="second@x.org"))
+    info = validate_azul_token(
+        "tok", expected_azp=_CLIENT_ID, allowed_emails=["first@x.org", "second@x.org"]
+    )
+    assert info["email"] == "second@x.org"
 
 
 def test_validate_azp_mismatch(monkeypatch):
@@ -93,10 +102,10 @@ def test_validate_azp_mismatch(monkeypatch):
         validate_azul_token("tok", expected_azp=_CLIENT_ID)
 
 
-def test_validate_email_mismatch(monkeypatch):
+def test_validate_email_not_authorized(monkeypatch):
     monkeypatch.setattr(azul_auth, "tokeninfo", lambda t: _info(email="someone@else.org"))
     with pytest.raises(AzulTokenError):
-        validate_azul_token("tok", expected_azp=_CLIENT_ID, expected_email=_EMAIL)
+        validate_azul_token("tok", expected_azp=_CLIENT_ID, allowed_emails=[_EMAIL])
 
 
 def test_validate_expired(monkeypatch):

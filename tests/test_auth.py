@@ -11,13 +11,14 @@ _HUMAN = "sa-user@broadinstitute.org"
 _PET = "pet-123@terra-abc.iam.gserviceaccount.com"
 
 
-def _tier(email=_HUMAN):
+def _tier(email=_HUMAN, authorized_users=None):
     return ResolvedTier(
         name="prod",
         email=email,
         adc_credentials_file=None,
         billing_project="b",
         azul_token_file=None,
+        authorized_users=authorized_users or [],
         service_urls={"sam": "https://sam.example/"},
     )
 
@@ -112,3 +113,10 @@ def test_identity_guard_audit_lookup_is_best_effort(monkeypatch):
     monkeypatch.setattr(auth, "active_identity_email", boom)
     monkeypatch.setattr(auth.requests, "get", lambda *a, **k: _FakeResp({"email": _HUMAN}))
     assert assert_tier_identity(object(), _tier(email=_HUMAN)) == _HUMAN
+
+
+def test_identity_guard_allows_additional_authorized_user(monkeypatch):
+    # A user listed in authorized_users (not the primary email) is allowed -> multi-operator support.
+    _patch_guard(monkeypatch, sam_email="teammate@broadinstitute.org", adc_email=_PET)
+    tier = _tier(email=_HUMAN, authorized_users=["teammate@broadinstitute.org"])
+    assert assert_tier_identity(object(), tier) == "teammate@broadinstitute.org"
