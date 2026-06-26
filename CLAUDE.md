@@ -23,8 +23,14 @@ run the same CLI non-interactively in Terra — see [`wdl/README.md`](wdl/README
 - ✅ **Validated end-to-end against dev** for the **open-access 1000G** snapshot: TDR → BigQuery →
   Azul (anonymous) → workspace → import → **`compare` reports QC PASS** (12 tables; row + column-count
   parity; empty TDR tables and `datarepo_row_ids` correctly excluded; auth-domain match).
-- ⏳ **Controlled-access not yet exercised end-to-end** — needs an Azul token (`azul-login`, R7) and a
-  controlled dataset (to truly test the auth-domain check, which 1000G leaves empty).
+- ✅ **Validated end-to-end for a controlled-access snapshot** (2026-06-26, the
+  `ANVIL_ccdg_asc_ndd_daly_talkowski_cdcseed_asd_…` snapshot): the `qc` flow ran with
+  `--allow-controlled-access` + an Azul token and reported **QC PASS** (12 tables, full row parity, 0
+  failing). This is the **first exercise of the auth-domain check against a real, non-empty domain**
+  (snapshot vs workspace both `AUTH_anvil_ccdg_asc_ndd_daly_talkowski_cdcseed_asd` → match), which the
+  open-access 1000G snapshot cannot test (its auth domain is empty). The run also proved out the
+  Sam-resolved identity guard, the multi-user `authorized_users` allowlist, and the `:0.2.1` image
+  together (run as the human account `sa-mbaumann@broadinstitute.org`).
 - ⏭️ **Deferred QC depth** (see [`docs/comparison.md`](docs/comparison.md)): full column-name
   comparison, T3 id-set parity, T4 cell-value comparison.
 
