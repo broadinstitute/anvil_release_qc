@@ -77,12 +77,19 @@ def terra_user_email(creds: Credentials, sam_url: str) -> str:
     identity guard treat a pet service account as its owning human user.
     """
     token = bearer_token(creds)
-    resp = requests.get(
-        f"{sam_url.rstrip('/')}{SAM_SELF_PATH}",
-        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
-        timeout=30,
-    )
-    resp.raise_for_status()
+    url = f"{sam_url.rstrip('/')}{SAM_SELF_PATH}"
+    try:
+        resp = requests.get(
+            url,
+            headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+            timeout=30,
+        )
+        resp.raise_for_status()
+    except requests.RequestException as exc:
+        raise RuntimeError(
+            f"Could not resolve the Terra user from Sam ({url}): {exc}. Is the active account a "
+            "registered Terra user, and is Sam reachable?"
+        ) from exc
     email = resp.json().get("email")
     if not email:
         raise RuntimeError("Sam /api/users/v2/self returned no email for the active identity.")
@@ -96,7 +103,13 @@ def assert_tier_identity(creds: Credentials, tier: ResolvedTier) -> str:
     and asserts it equals ``tier.email``. The raw ADC identity (e.g. the pet SA in a Terra workflow) is
     logged for the audit trail. Returns the resolved Terra-user email.
     """
-    adc_identity = active_identity_email(creds)  # raw ADC account (a pet SA in a Terra workflow)
+    # Raw ADC account (e.g. the pet SA) -- audit-only now that Sam is the authority, so best-effort:
+    # never let this lookup block an otherwise-valid run.
+    try:
+        adc_identity = active_identity_email(creds)
+    except (requests.RequestException, RuntimeError) as exc:
+        logger.debug("Could not resolve the raw ADC identity for the audit log: %s", exc)
+        adc_identity = "unknown"
     terra_user = terra_user_email(creds, tier.url("sam"))
     if terra_user.lower() != tier.email.lower():
         raise IdentityMismatchError(
