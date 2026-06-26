@@ -120,3 +120,12 @@ def test_identity_guard_allows_additional_authorized_user(monkeypatch):
     _patch_guard(monkeypatch, sam_email="teammate@broadinstitute.org", adc_email=_PET)
     tier = _tier(email=_HUMAN, authorized_users=["teammate@broadinstitute.org"])
     assert assert_tier_identity(object(), tier) == "teammate@broadinstitute.org"
+
+
+def test_identity_guard_rejects_user_outside_multi_user_allowlist(monkeypatch):
+    # With an allowlist (email + authorized_users), a user in NEITHER is still rejected: broadening
+    # WHO is allowed must not become "allow anyone".
+    _patch_guard(monkeypatch, sam_email="stranger@broadinstitute.org", adc_email=_PET)
+    tier = _tier(email=_HUMAN, authorized_users=["teammate@broadinstitute.org"])
+    with pytest.raises(IdentityMismatchError):
+        assert_tier_identity(object(), tier)

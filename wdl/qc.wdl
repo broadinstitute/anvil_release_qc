@@ -22,7 +22,7 @@ workflow Qc {
         Boolean dry_run = false
         Boolean allow_controlled_access = false
         File? azul_token
-        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.2.0"
+        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.2.1"
     }
 
     call qc {
