@@ -144,7 +144,8 @@ flow itself is specified in [`docs/export_import_flow.md`](docs/export_import_fl
   path in all three.
 
 **Auth** (see *Two tiers*):
-- Google **ADC** everywhere; **one standard Google user account per tier**, both tiers identical.
+- Google **ADC** everywhere; **one human Terra user account per tier**, both tiers identical (in a Terra
+  workflow the runtime **pet service account** resolves to this human user via Sam — see the identity guard).
 - Locally, a per-tier saved ADC file selected via `GOOGLE_APPLICATION_CREDENTIALS`; in deployment,
   ADC falls back to the ambient runtime identity (no code change).
 - The gcloud ADC creds serve **TDR, BigQuery, and Terra** (Rawls/Firecloud): one
@@ -154,8 +155,11 @@ flow itself is specified in [`docs/export_import_flow.md`](docs/export_import_fl
   client). Capture one interactively with `anvil-data-qc azul-login` (validated via Google `tokeninfo`,
   stored per tier in `azul_token_file`); no token ⇒ anonymous (open-access only). See
   [`export_import_flow.md`](docs/export_import_flow.md) → Authentication and risk **R7**.
-- **Identity guard:** before any API call, resolve the active credential's email and assert it equals
-  the configured email for the selected tier; abort on mismatch.
+- **Identity guard:** before any API call, resolve the active credentials to their **canonical Terra
+  user** via Sam (`/api/users/v2/self`, which maps a Terra **pet service account** to its owning human
+  user) and assert it equals the configured tier email; abort on mismatch. So the tier `email` is the
+  **human Terra account** in every context (local *and* the Terra/WDL deployment, where the runtime
+  identity is the pet SA) — the raw ADC identity is logged for the audit trail.
 - Scopes: plain `gcloud auth application-default login` (defaults `openid`, `email`,
   `cloud-platform`) — no custom scope string.
 

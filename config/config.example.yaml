@@ -10,7 +10,10 @@ default_tier: dev
 
 tiers:
   dev:
-    # Your Google account for the DEV tier (must match the active ADC identity — enforced at runtime).
+    # The human Terra user account for the DEV tier. Enforced at runtime by the identity guard, which
+    # resolves the active credentials to their Terra user via Sam (/api/users/v2/self) — so in a Terra
+    # workflow the runtime pet service account maps back to this human account. Use the human account
+    # in every context (local and deployment), NOT a pet service account.
     email: you@test.firecloud.org
     # Saved ADC credentials for this tier. Create with:
     #   gcloud auth application-default login        # signed in as the dev account
