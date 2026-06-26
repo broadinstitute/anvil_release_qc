@@ -95,8 +95,12 @@ def validate_azul_token(
     """Validate an Azul access token the way Azul does; raise ``AzulTokenError`` if it won't work.
 
     Checks (via ``tokeninfo``): ``azp`` == the Azul OAuth client, that the token's account is one of
-    ``allowed_emails`` (when given -- supporting multiple authorized operators), and at least
-    ``min_remaining_seconds`` of life left. Returns the tokeninfo dict on success.
+    ``allowed_emails``, and at least ``min_remaining_seconds`` of life left. Returns the tokeninfo
+    dict on success.
+
+    Email check: ``allowed_emails=None`` skips it (caller doesn't constrain the account); a *provided*
+    collection is enforced, and an empty one rejects every account (fail-closed, matching the identity
+    guard). Callers pass ``tier.authorized_emails``, which always contains the required tier ``email``.
     """
     info = tokeninfo(token)
     azp = info.get("azp")
@@ -106,7 +110,7 @@ def validate_azul_token(
             "Azul will reject it — copy the token from the Azul Swagger UI (it must be issued to "
             "Azul's own client), e.g. via `anvil-data-qc azul-login`."
         )
-    if allowed_emails:
+    if allowed_emails is not None:
         token_email = (info.get("email") or "").lower()
         allowed = {e.lower() for e in allowed_emails}
         if token_email not in allowed:

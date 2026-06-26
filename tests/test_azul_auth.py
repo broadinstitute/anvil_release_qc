@@ -108,6 +108,24 @@ def test_validate_email_not_authorized(monkeypatch):
         validate_azul_token("tok", expected_azp=_CLIENT_ID, allowed_emails=[_EMAIL])
 
 
+def test_validate_rejects_when_not_in_multiple(monkeypatch):
+    # Multi-operator: a token from an account in NONE of allowed_emails is rejected, and the check
+    # is case-insensitive on the allow-set side too (mixed-case entries still match exactly).
+    monkeypatch.setattr(azul_auth, "tokeninfo", lambda t: _info(email="outsider@x.org"))
+    with pytest.raises(AzulTokenError):
+        validate_azul_token(
+            "tok", expected_azp=_CLIENT_ID, allowed_emails=["First@x.org", "Second@x.org"]
+        )
+
+
+def test_validate_empty_allowed_emails_fails_closed(monkeypatch):
+    # A provided-but-empty allow-set rejects every account (fail-closed, matching the identity guard);
+    # only allowed_emails=None skips the email check.
+    monkeypatch.setattr(azul_auth, "tokeninfo", lambda t: _info(email=_EMAIL))
+    with pytest.raises(AzulTokenError):
+        validate_azul_token("tok", expected_azp=_CLIENT_ID, allowed_emails=[])
+
+
 def test_validate_expired(monkeypatch):
     monkeypatch.setattr(azul_auth, "tokeninfo", lambda t: _info(expires_in="60"))
     with pytest.raises(AzulTokenError, match="expires"):
