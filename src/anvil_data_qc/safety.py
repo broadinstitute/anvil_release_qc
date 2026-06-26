@@ -74,22 +74,21 @@ def assert_open_access(snapshot_id: str, consent_code: Optional[str]) -> None:
 
 def assert_consent_permitted(
     snapshot_id: str, consent_code: Optional[str], *, allow_controlled_access: bool
-) -> bool:
-    """Consent gate: decide whether the pipeline may proceed for this snapshot.
+) -> None:
+    """Consent gate: permit the run, or raise ``ControlledAccessNotApprovedError``.
 
     - ``allow_controlled_access=False`` (default): only explicitly open-access snapshots pass --
-      raises ``ControlledAccessNotApprovedError`` unless ``consent_code == "NRES"``.
+      raises unless ``consent_code == "NRES"``.
     - ``allow_controlled_access=True``: controlled-access was explicitly authorized for this run (the
       Broad security team approved all AnVIL data), so **any** consentCode is permitted.
 
-    Returns ``True`` when proceeding under controlled-access authorization (the caller must emit the
-    controlled-access audit log), ``False`` for a normal open-access snapshot. Layers 2-4 (signed-URL
-    containment, hand-off verification, bearer-pinning) apply regardless.
+    Open-access-vs-controlled labeling, and the token requirement for controlled data, are handled by
+    the caller keyed off the actual ``consent_code`` -- so an open-access snapshot is never mislabeled
+    "controlled" merely because the opt-in was set. Layers 2-4 apply regardless.
     """
     if allow_controlled_access:
-        return True
+        return
     assert_open_access(snapshot_id, consent_code)
-    return False
 
 
 # --- Layer 2: secret containment ---

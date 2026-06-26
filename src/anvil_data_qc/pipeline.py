@@ -41,7 +41,9 @@ from .logging_setup import LOGGER_NAME, setup_logging, write_header
 from .safety import (
     SIGNED_URL_ALLOWED_PREFIXES,
     ControlledAccessNotApprovedError,
+    SafetyError,
     assert_consent_permitted,
+    is_open_access,
     verify_pfb_handoff,
 )
 from .timing import stage_timer
@@ -122,13 +124,27 @@ def run_qc(
     # gated behind the explicit opt-in; layers 2-4 (containment, hand-off, bearer-pin) apply regardless.
     consent_code = snapshot_consent_code(snapshot)
     try:
-        controlled = assert_consent_permitted(
+        assert_consent_permitted(
             snapshot_id, consent_code, allow_controlled_access=allow_controlled_access
         )
     except ControlledAccessNotApprovedError as exc:
         logger.error("%s", exc)
         raise
-    if controlled:
+    # Label and enforce off the ACTUAL consentCode (not just the opt-in): an open-access snapshot is
+    # never mislabeled "controlled" when the flag is set, and a genuinely controlled snapshot with no
+    # Azul token fails fast here (anonymous Azul cannot fetch controlled data) instead of confusingly
+    # later at the manifest step.
+    if is_open_access(consent_code):
+        logger.info("Consent gate OK: snapshot is open-access (consentCode=%r).", consent_code)
+    elif azul_token is None:
+        exc = SafetyError(
+            f"Snapshot {snapshot_id} is controlled-access (consentCode={consent_code!r}) but no Azul "
+            "token is available; controlled-access data requires a token (run `anvil-data-qc "
+            "azul-login` or pass --azul-token-file). Aborting before any signed URL is generated."
+        )
+        logger.error("%s", exc)
+        raise exc
+    else:
         logger.warning(
             "CONTROLLED-ACCESS run AUTHORIZED (allow_controlled_access=True): snapshot %s, "
             "consentCode=%r, tier %s. The PFB signed URL grants direct controlled-data access; "
@@ -137,8 +153,6 @@ def run_qc(
             consent_code,
             tier.name,
         )
-    else:
-        logger.info("Consent gate OK: snapshot is open-access (consentCode=%r).", consent_code)
 
     bq_project, bq_dataset = snapshot_bigquery_access(snapshot)
     logger.info("Snapshot '%s' -> BigQuery %s.%s", name, bq_project, bq_dataset)

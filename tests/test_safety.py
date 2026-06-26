@@ -39,8 +39,8 @@ def test_snapshot_consent_code_extraction():
 
 
 def test_consent_gate_open_access_default():
-    # Default (opt-in off): open-access proceeds and returns False (the normal, non-controlled path).
-    assert assert_consent_permitted("snap-1", "NRES", allow_controlled_access=False) is False
+    # Default (opt-in off): open-access (NRES) proceeds without raising.
+    assert_consent_permitted("snap-1", "NRES", allow_controlled_access=False)
 
 
 @pytest.mark.parametrize("code", ["", None, "GRU", "nres", "phs000123"])
@@ -52,6 +52,5 @@ def test_consent_gate_blocks_controlled_when_opt_in_off(code):
 
 @pytest.mark.parametrize("code", ["NRES", "GRU", "HMB", "phs000123", "", None])
 def test_consent_gate_allows_any_code_when_opt_in_on(code):
-    # Opt-in on (security-approved): any consentCode -- including empty/unknown -- is permitted, and
-    # returns True so the caller emits the controlled-access audit log.
-    assert assert_consent_permitted("snap-1", code, allow_controlled_access=True) is True
+    # Opt-in on (security-approved): any consentCode -- including empty/unknown -- is permitted (no raise).
+    assert_consent_permitted("snap-1", code, allow_controlled_access=True)
