@@ -1,9 +1,11 @@
 """Authentication via Google Application Default Credentials (ADC), with a tier identity guard.
 
-One standard Google user account per tier. Locally the credentials come from a per-tier saved ADC
-file; in deployment, from the ambient runtime identity. The same credentials yield both REST bearer
-tokens (Azul, Terra) and the BigQuery client. Before any tier work, the identity guard asserts the
-active credential's email matches the configured email for the selected tier.
+One human Terra user account per tier. Locally the credentials come from a per-tier saved ADC file; in
+deployment, from the ambient runtime identity (a Terra **pet service account**). The same credentials
+yield both REST bearer tokens (Azul, Terra) and the BigQuery client. Before any tier work, the identity
+guard resolves the **canonical Terra user** behind the active credentials via Sam
+(``/api/users/v2/self``, which maps a pet service account to its owning human user) and asserts it
+equals the configured email for the selected tier.
 """
 
 from __future__ import annotations
@@ -28,6 +30,11 @@ SCOPES = (
 )
 
 USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
+
+#: Sam endpoint that maps an access token (a human login OR a Terra pet service account) to the
+#: registered Terra user, returning their human email -- so the identity guard treats a pet SA as its
+#: owning user (Sam Swagger: GET /api/users/v2/self).
+SAM_SELF_PATH = "/api/users/v2/self"
 
 
 class IdentityMismatchError(RuntimeError):
@@ -62,13 +69,44 @@ def active_identity_email(creds: Credentials) -> str:
     return email
 
 
+def terra_user_email(creds: Credentials, sam_url: str) -> str:
+    """Resolve the canonical Terra user email behind the active credentials, via Sam.
+
+    Works for both a human ADC login and a Terra pet service account: Sam's ``/api/users/v2/self``
+    maps the access token to the registered Terra user and returns their (human) email. This lets the
+    identity guard treat a pet service account as its owning human user.
+    """
+    token = bearer_token(creds)
+    resp = requests.get(
+        f"{sam_url.rstrip('/')}{SAM_SELF_PATH}",
+        headers={"Authorization": f"Bearer {token}", "Accept": "application/json"},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    email = resp.json().get("email")
+    if not email:
+        raise RuntimeError("Sam /api/users/v2/self returned no email for the active identity.")
+    return email
+
+
 def assert_tier_identity(creds: Credentials, tier: ResolvedTier) -> str:
-    """Identity guard: abort unless the active credential's email matches the tier's configured email."""
-    actual = active_identity_email(creds)
-    if actual.lower() != tier.email.lower():
+    """Identity guard: abort unless the active credentials' Terra user matches the tier's email.
+
+    Resolves the canonical Terra user via Sam (mapping a pet service account to its owning human user)
+    and asserts it equals ``tier.email``. The raw ADC identity (e.g. the pet SA in a Terra workflow) is
+    logged for the audit trail. Returns the resolved Terra-user email.
+    """
+    adc_identity = active_identity_email(creds)  # raw ADC account (a pet SA in a Terra workflow)
+    terra_user = terra_user_email(creds, tier.url("sam"))
+    if terra_user.lower() != tier.email.lower():
         raise IdentityMismatchError(
-            f"Active identity '{actual}' does not match configured '{tier.email}' for tier "
-            f"'{tier.name}'. Refusing to proceed (wrong-tier guard)."
+            f"Active Terra user '{terra_user}' (ADC identity '{adc_identity}') does not match the "
+            f"configured '{tier.email}' for tier '{tier.name}'. Refusing to proceed (wrong-tier guard)."
         )
-    logger.info("Identity guard OK: %s (tier '%s').", actual, tier.name)
-    return actual
+    logger.info(
+        "Identity guard OK: Terra user %s (ADC identity %s; tier '%s').",
+        terra_user,
+        adc_identity,
+        tier.name,
+    )
+    return terra_user
