@@ -24,10 +24,13 @@ share the same QC** — the import tail (createWorkspace → importJob → poll)
 >   auth-domain `[]`==`[]`). Stage durations: export 41.8s, workspace 21.4s, import ~618s (~10 min — the
 >   automation's patient polling rode out the slow dev import that failed interactively).
 
-> **⚠️ Safety gate — open-access only (for now).** `tdr-qc` runs only on snapshots whose top-level
-> `consentCode` is exactly `NRES`. Controlled-access `tdr-qc` is **blocked entirely** — even with
-> `--allow-controlled-access` — until the `tdrSyncPermissions` question below is resolved (see
-> `safety.assert_tdr_qc_permitted` and risk **R8**).
+> **Safety gate — open-access by default; controlled-access via opt-in.** By default `tdr-qc` runs only
+> on snapshots whose top-level `consentCode` is exactly `NRES`; controlled-access requires the explicit
+> `--allow-controlled-access` opt-in (any `consentCode`, audit-logged), the same default-off gate as
+> `ade-qc` (`safety.assert_consent_permitted`). No Azul token is involved — the operator's own Terra
+> credentials must already grant access to the controlled data (TDR `/export` 403s otherwise). The
+> `tdrSyncPermissions` question that previously blocked controlled-access was **resolved 2026-06-27**
+> (see below) — `tdrSyncPermissions: false` for all data. See risk **R8**.
 
 ## Authentication
 
@@ -85,27 +88,31 @@ account; the Terra import service fetches them server-side.
 - **Tabular comparison** (`compare/`): AW data tables (Rawls entities) vs the TDR snapshot tables
   (BigQuery), T1–T2 (table parity, row counts, column-count sanity), with the usual normalizations.
 
-## ⚠️ `tdrSyncPermissions` — open safety question (resolve before controlled-access)
+## `tdrSyncPermissions: false` — resolved correct + safe for all data (2026-06-27)
 
-The captured importJob used `options.tdrSyncPermissions = false`. The maintainer's understanding is that
-TDR snapshot permissions **generally are synced (`true`)** from the snapshot to the workspace, and the
-`false` here is likely **because 1000G is open-access**. Mirroring `false` onto **controlled** data
-could leave the workspace **under-protected — a potential Federal DMI**. Therefore:
+The importJob sets `options.tdrSyncPermissions = false` for **every** run, including controlled-access.
+This was initially flagged as an open question (could `false` under-protect a controlled workspace?) and
+**resolved with a production controlled-access capture** (the `ANVIL_dGTEx_GRU_v1` GRU snapshot):
 
-- `tdrSyncPermissions` is **not hardcoded blindly**; `tdr-qc` mirrors the open-access capture (`false`)
-  and is **open-access-only**.
-- The correct **controlled-access** value (likely `true`) — and whether `tdrexport` applies the
-  snapshot's auth domain at all — **must be confirmed** (ideally via a fresh controlled-snapshot
-  capture/test) **before** controlled-access `tdr-qc` is enabled. This is enforced in code:
-  `safety.assert_tdr_qc_permitted` blocks any non-open-access snapshot.
-- Backstop: even if permission sync were wrong, the **QC auth-domain check would catch it** for a
-  controlled snapshot (Sam-expected non-empty vs workspace-actual empty ⇒ QC **FAIL**) — but that is a
-  *post-hoc* detector; we want the cause right, not just the detector.
+- **`false` is what production uses for controlled data** — the captured controlled-access importJob used
+  `tdrSyncPermissions: false`, the same as the open-access flow.
+- **The auth domain — the real access gate — is applied independently of `tdrSyncPermissions`.** The
+  workspace is created with `authorizationDomain: []`, and the import privileged-sets the snapshot's auth
+  domain afterward (verified: the produced GRU workspace carried `AUTH_AnVIL_dGTEx_GRU_v1`). So `false`
+  does **not** leave a controlled workspace under-protected.
+- **`false` is the least-privilege choice.** A new workspace is owner-only, and the owner had to be
+  authorized (TDR `/export` 403s otherwise); sharing is still gated by the auth domain. `tdrSyncPermissions:
+  true` would copy the snapshot's reader policies onto the workspace — granting access we do **not** intend.
+- **Backstop:** the QC auth-domain check (Sam-expected vs workspace-actual) would still flag any failure to
+  apply the domain (non-empty expected vs empty actual ⇒ QC **FAIL**).
+
+So `tdr-qc` keeps `tdrSyncPermissions: false` for all data and supports controlled-access via the standard
+default-off `--allow-controlled-access` opt-in (`safety.assert_consent_permitted`).
 
 ## Safety mapping (the four layers — see [`../src/anvil_data_qc/safety.py`](../src/anvil_data_qc/safety.py))
 
-1. **Consent gate** — `tdr-qc` is open-access only (`assert_tdr_qc_permitted`), enforced **before** the
-   export (before any signed URL exists).
+1. **Consent gate** — open-access by default; controlled-access via the explicit `--allow-controlled-access`
+   opt-in (`assert_consent_permitted`), enforced **before** the export (before any signed URL exists).
 2. **Secret containment** — `format.parquet.manifest` is wrapped in `SignedUrl`; revealed only at the
    importJob site. The raw export result (many signed URLs) is never logged.
 3. **Hand-off verification** — destination pinned to the tier's Firecloud host; **provenance** =

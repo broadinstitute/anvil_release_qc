@@ -55,7 +55,6 @@ from .safety import (
     SafetyError,
     SignedUrl,
     assert_consent_permitted,
-    assert_tdr_qc_permitted,
     is_open_access,
     tdr_export_allowed_prefixes,
     verify_pfb_handoff,
@@ -67,11 +66,12 @@ logger = logging.getLogger(LOGGER_NAME)
 
 # tdr-qc importJob shape (Terra import of a TDR snapshot export; see docs/tdr_export_flow.md).
 TDR_IMPORT_FILETYPE = "tdrexport"
-# ``tdrSyncPermissions`` mirrors the open-access capture (False). tdr-qc is open-access-ONLY for now
-# (controlled-access is blocked by safety.assert_tdr_qc_permitted), so syncing nothing is correct here.
-# The CORRECT value for CONTROLLED data is unconfirmed (likely True) and MUST be resolved before
-# enabling controlled-access tdr-qc -- do NOT flip this without that confirmation. See risk R8 and
-# docs/tdr_export_flow.md.
+# ``tdrSyncPermissions=False`` for ALL data, incl. controlled-access. Confirmed correct + safe (2026-06-27)
+# from a prod CONTROLLED-access capture (the GRU dGTEx flow used False) plus: the import applies the
+# snapshot's auth domain to the workspace INDEPENDENTLY of this flag (verified), so False does not
+# under-protect; and False is least-privilege -- a new workspace is owner-only and sharing stays gated by
+# the auth domain, whereas True would sync the snapshot's reader policies (granting access we don't intend).
+# See risk R8 and docs/tdr_export_flow.md.
 TDR_SYNC_PERMISSIONS = False
 
 
@@ -339,8 +339,9 @@ def run_tdr_qc(
     very large datasets that fail to export via ADE/Azul.
 
     ``dry_run`` stops after the export manifest is obtained -- no workspace is created and no import is
-    run. ``allow_controlled_access`` is accepted for parity with ade-qc, but controlled-access tdr-qc is
-    **not yet enabled** (see ``safety.assert_tdr_qc_permitted``); only open-access snapshots run.
+    run. ``allow_controlled_access`` opts in to running on non-open-access snapshots (default off = fail
+    closed, open-access only); no Azul token is needed (the operator's own Terra credentials must grant
+    access to the controlled data). See ``safety.assert_consent_permitted``.
     """
     setup = _setup_run(snapshot_id, tier_name, config_path, log_dir)
     tier = setup.tier
@@ -351,19 +352,34 @@ def run_tdr_qc(
     snapshot = tdr.retrieve_snapshot(snapshot_id)
     name = snapshot_name(snapshot)
 
-    # SAFETY GATE (layer 1): tdr-qc is OPEN-ACCESS ONLY for now. Controlled-access is blocked entirely
-    # (even with allow_controlled_access) until the importJob tdrSyncPermissions value / tdrexport
-    # auth-domain behavior for controlled data is confirmed -- see safety.assert_tdr_qc_permitted. Runs
-    # before any export/signed URL is generated.
+    # SAFETY GATE (layer 1): only explicitly open-access snapshots proceed UNLESS controlled-access was
+    # explicitly authorized for this run (allow_controlled_access). The TDR export signed URL grants
+    # direct access to the snapshot's data; mishandling it (e.g. a prod URL into the insecure dev tier)
+    # is a Federal DMI. Controlled-access is security-team approved, gated behind the explicit opt-in;
+    # layers 2-4 apply regardless. Unlike ade-qc there is no Azul token -- the operator's own Terra
+    # credentials must already grant access to the controlled data (TDR /export 403s otherwise), and the
+    # import applies the snapshot's auth domain to the workspace independently of tdrSyncPermissions
+    # (verified post-import by the QC auth-domain check). Runs before any export/signed URL is generated.
     consent_code = snapshot_consent_code(snapshot)
     try:
-        assert_tdr_qc_permitted(
+        assert_consent_permitted(
             snapshot_id, consent_code, allow_controlled_access=allow_controlled_access
         )
-    except SafetyError as exc:
+    except ControlledAccessNotApprovedError as exc:
         logger.error("%s", exc)
         raise
-    logger.info("Consent gate OK: snapshot is open-access (consentCode=%r).", consent_code)
+    if is_open_access(consent_code):
+        logger.info("Consent gate OK: snapshot is open-access (consentCode=%r).", consent_code)
+    else:
+        logger.warning(
+            "CONTROLLED-ACCESS run AUTHORIZED (allow_controlled_access=True): snapshot %s, "
+            "consentCode=%r, tier %s. The TDR export signed URL grants direct controlled-data access; "
+            "hand-off verification and bearer-pinning still apply. The import applies the snapshot's "
+            "auth domain (verified by the QC auth-domain check).",
+            snapshot_id,
+            consent_code,
+            tier.name,
+        )
 
     bq_project, bq_dataset = snapshot_bigquery_access(snapshot)
     logger.info("Snapshot '%s' -> BigQuery %s.%s", name, bq_project, bq_dataset)

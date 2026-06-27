@@ -4,10 +4,11 @@ version 1.0
 # from TDR (no ADE/Azul) to a NEW Analysis Workspace and QC it (AW vs snapshot + auth-domain). Runs
 # `anvil-data-qc tdr-qc`. For very large datasets that fail to export via ADE/Azul.
 #
-# Uses the ambient Terra runtime service account throughout -- NO Azul token needed (unlike ade_qc.wdl).
-# OPEN-ACCESS ONLY for now: the CLI consent gate blocks anything but consentCode == "NRES"; controlled-
-# access tdr-qc is not yet enabled (pending confirmation of the importJob tdrSyncPermissions / auth-
-# domain behavior for controlled data). allow_controlled_access is accepted for parity but still blocks.
+# Uses the ambient Terra runtime service account throughout -- NO Azul token needed (unlike ade_qc.wdl),
+# for open- AND controlled-access. Open-access by default; controlled-access via allow_controlled_access
+# (same default-off opt-in as ade_qc.wdl). The runtime identity's own Terra access must cover controlled
+# data (TDR /export 403s otherwise); the import applies the snapshot's auth domain (verified by the QC
+# auth-domain check). tdrSyncPermissions stays false for all data -- see docs/tdr_export_flow.md.
 #
 # Side effects: creates a real, RETAINED Analysis Workspace and runs the import (minutes to ~1 hr). The
 # task always succeeds and surfaces the result as outputs; the detailed log (with the QC report, stage
@@ -45,7 +46,7 @@ workflow TdrQc {
         snapshot_id: "TDR snapshot id to export and QC. Open-access only for now."
         tier: "Tier (dev|prod). Optional; defaults to the config's default_tier."
         dry_run: "Validate the export side only (TDR snapshot export); create no workspace, no import."
-        allow_controlled_access: "Accepted for parity, but controlled-access tdr-qc is not yet enabled (open-access only)."
+        allow_controlled_access: "Opt in to controlled-access snapshots (any consentCode). Default false = open-access only. No Azul token needed."
         docker: "anvil-data-qc image reference, e.g. <registry>/anvil-data-qc:<tag>."
     }
 }
@@ -66,9 +67,9 @@ task tdr_qc {
     command <<<
         set -euo pipefail
 
-        # Open-access only for now (controlled-access tdr-qc not yet enabled). The pipeline logs to
+        # Open-access by default; controlled-access via allow_controlled_access. The pipeline logs to
         # stderr; capture the exit code without failing the task. 0 = PASS, 1 = QC failure,
-        # 2 = safety abort (e.g. a controlled-access snapshot, which tdr-qc blocks).
+        # 2 = safety abort (e.g. a controlled-access snapshot without the opt-in).
         set +e
         anvil-data-qc tdr-qc \
             --config "~{config}" \
