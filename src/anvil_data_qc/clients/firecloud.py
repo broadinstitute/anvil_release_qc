@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import logging
 import time
+from typing import Optional
 
 from ..logging_setup import LOGGER_NAME
 from ..safety import SignedUrl
@@ -28,11 +29,21 @@ FAILURE_STATUSES = frozenset({"Error"})
 
 
 class FirecloudClient(BaseClient):
-    def submit_import_job(self, namespace: str, name: str, signed_url: SignedUrl) -> dict:
+    def submit_import_job(
+        self,
+        namespace: str,
+        name: str,
+        signed_url: SignedUrl,
+        *,
+        filetype: str = "pfb",
+        options: Optional[dict] = None,
+    ) -> dict:
         # THE SINGLE SITE that unwraps the signed URL: it goes straight into the importJob body and
         # nowhere else. The destination/provenance checks (safety.verify_pfb_handoff) run before this,
         # and the request body is logged redacted (base client). Do not add other reveal() calls.
-        body = {"url": signed_url.reveal(), "filetype": "pfb", "options": None}
+        # filetype/options vary by flow: ade-qc -> ("pfb", None); tdr-qc -> ("tdrexport",
+        # {"tdrSyncPermissions": ...}). The import endpoint and polling are identical for both.
+        body = {"url": signed_url.reveal(), "filetype": filetype, "options": options}
         return self.request(
             "POST", f"/api/workspaces/{namespace}/{name}/importJob", json_body=body
         ).json()

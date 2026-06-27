@@ -45,7 +45,8 @@ failures:
 
 ## Running it
 
-The comparison runs automatically as the final step of the `ade-qc` pipeline (after the import). To QC an
+The comparison runs automatically as the final step of both the `ade-qc` and `tdr-qc` pipelines (after
+the import) — the comparison engine is identical regardless of how the workspace was populated. To QC an
 **existing** workspace without re-importing:
 
 ```bash

@@ -9,13 +9,19 @@ validated against dev**. The package `src/anvil_data_qc/` provides: `config` (YA
 resolution), `auth` (ADC per tier + identity guard), `azul_auth` (Azul token capture/validation),
 `logging_setup`, `clients/` (base + `tdr`, `azul`, `rawls`, `firecloud`, `sam`), `bigquery`,
 `workspace` (naming), `compare/` (the comparison seams: `sources`, `profile`, `engine`, `report`,
-`authdomain`, `qc`, and `ingest`), `pipeline` (the wired flow), and `cli` (Typer: `ade-qc`, `compare`,
-`compare-ingest`, `azul-login`). The ADE/Azul export/import pipeline (`ade-qc`) runs TDR → BigQuery
-`dataset_id` → Azul manifest → Rawls `createWorkspace` → Firecloud `importJob` → **QC** (AW-vs-snapshot
-table comparison + auth-domain verification). Separately, **`compare-ingest`** covers the upstream `ADSW → TDR` step
+`authdomain`, `qc`, and `ingest`), `pipeline` (the wired flow), and `cli` (Typer: `ade-qc`, `tdr-qc`,
+`compare`, `compare-ingest`, `azul-login`). The ADE/Azul export/import pipeline (`ade-qc`) runs TDR →
+BigQuery `dataset_id` → Azul manifest → Rawls `createWorkspace` → Firecloud `importJob` → **QC**
+(AW-vs-snapshot table comparison + auth-domain verification). A **second route, `tdr-qc`**
+([`docs/tdr_export_flow.md`](docs/tdr_export_flow.md)), reaches the same QC via a **direct TDR snapshot
+export** (no ADE/Azul; Terra/ADC tokens throughout) → signed `manifest.json` → the **same** Rawls/
+Firecloud import tail (`importJob` `filetype: tdrexport`) → the **same** QC — for very large datasets
+that fail ADE export (open-access only for now; controlled-access blocked pending a `tdrSyncPermissions`
+confirmation). The two flows share `pipeline._create_import_and_qc` (the import+QC tail). Separately,
+**`compare-ingest`** covers the upstream `ADSW → TDR` step
 (submitter workspace vs TDR snapshot; table presence + exact row-count parity, driven from the
 submitter side) — the ingestion-completeness check. For deployment, a code-only **Docker image**
-(`Dockerfile`) plus three **womtool-validated WDL** wrappers (`wdl/{ade_qc,compare,compare_ingest}.wdl`)
+(`Dockerfile`) plus four **womtool-validated WDL** wrappers (`wdl/{ade_qc,tdr_qc,compare,compare_ingest}.wdl`)
 run the same CLI non-interactively in Terra — see [`wdl/README.md`](wdl/README.md).
 
 **Status of the implementation:**
