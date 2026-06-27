@@ -42,6 +42,9 @@ workflow AdeQc {
         File detailed_log = ade_qc.detailed_log
         Int qc_exit_code = ade_qc.qc_exit_code
         Boolean qc_passed = ade_qc.qc_passed
+        Float azul_manifest_minutes = ade_qc.azul_manifest_minutes
+        Float workspace_create_minutes = ade_qc.workspace_create_minutes
+        Float import_minutes = ade_qc.import_minutes
     }
 
     parameter_meta {
@@ -90,8 +93,19 @@ task ade_qc {
         echo "$?" > qc_exit_code.txt
         set -e
 
-        # The pipeline logs the QC report into the detailed log; extract it as a clean report output.
+        # The pipeline logs the QC report into the detailed log; extract it as a clean report output,
+        # then append the end-of-run stage-timing summary line (minutes) so it rides with the report.
         sed -n '/QC report:/,/Overall QC/p' detailed_log.txt > qc_report.txt || true
+        TIMINGS="$(grep -F 'Stage timings (minutes)' detailed_log.txt | tail -1 || true)"
+        if [ -n "$TIMINGS" ]; then echo "$TIMINGS" >> qc_report.txt; fi
+
+        # Per-stage durations as Float outputs, in MINUTES (the user-experienced delays). Parse them
+        # from the summary line; a stage that did not run (e.g. a dry run) defaults to 0.
+        for stage in azul_manifest workspace_create import; do
+            echo "$TIMINGS" | grep -oE "${stage}=[0-9.]+" | cut -d= -f2 | head -1 > "${stage}_minutes.txt" || true
+            [ -s "${stage}_minutes.txt" ] || echo 0 > "${stage}_minutes.txt"
+        done
+
         cat detailed_log.txt  # surface the full log in the Cromwell task stdout
     >>>
 
@@ -107,5 +121,9 @@ task ade_qc {
         File detailed_log = "detailed_log.txt"
         Int qc_exit_code = read_int("qc_exit_code.txt")
         Boolean qc_passed = read_int("qc_exit_code.txt") == 0
+        # Per-stage durations in minutes (the user-experienced delays); 0 if the stage did not run.
+        Float azul_manifest_minutes = read_float("azul_manifest_minutes.txt")
+        Float workspace_create_minutes = read_float("workspace_create_minutes.txt")
+        Float import_minutes = read_float("import_minutes.txt")
     }
 }

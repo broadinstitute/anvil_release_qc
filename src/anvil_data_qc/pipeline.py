@@ -59,7 +59,7 @@ from .safety import (
     tdr_export_allowed_prefixes,
     verify_pfb_handoff,
 )
-from .timing import stage_timer
+from .timing import log_stage_summary, stage_timer
 from .workspace import ADE_NAME_INFIX, TDR_NAME_INFIX, workspace_name
 
 logger = logging.getLogger(LOGGER_NAME)
@@ -164,9 +164,9 @@ def _create_import_and_qc(
         firecloud.wait_for_import(tier.billing_project, ws_name, job_id)
 
     logger.info("Export/import complete. Workspace: %s/%s", tier.billing_project, ws_name)
-    logger.info("Stage durations: %s", {k: round(v, 1) for k, v in durations.items()})
 
-    # QC: compare the AW data tables to the TDR snapshot (T1-T2) and verify the auth domain.
+    # QC: compare the AW data tables to the TDR snapshot (T1-T2) and verify the auth domain. (QC is
+    # not a timed stage -- it is quick and not a user-experienced delay, like the `compare` command.)
     qc = run_qc_comparison(
         creds=setup.creds,
         tier=tier,
@@ -182,6 +182,9 @@ def _create_import_and_qc(
         logger.warning(
             "QC FAILED for %s/%s -- see the report above.", tier.billing_project, ws_name
         )
+    # End-of-run summary of the user-experienced stage delays (minutes); appended to the QC report and
+    # parsed into the per-stage WDL duration outputs.
+    log_stage_summary(durations)
     return {
         "workspace_namespace": tier.billing_project,
         "workspace_name": ws_name,
@@ -298,6 +301,7 @@ def run_ade_qc(
             "Skipping workspace creation and import.",
             location,
         )
+        log_stage_summary(durations)  # export stage only on a dry run
         return {
             "dry_run": True,
             "snapshot_name": name,
@@ -400,6 +404,7 @@ def run_tdr_qc(
             "Skipping workspace creation and import.",
             location,
         )
+        log_stage_summary(durations)  # export stage only on a dry run
         return {
             "dry_run": True,
             "snapshot_name": name,
