@@ -1,0 +1,9 @@
+{
+  "AdeQc.config": "gs://your-bucket/anvil-data-qc/config.yaml",
+  "AdeQc.snapshot_id": "e8dacaea-d37d-48e5-b0a9-c88777753423",
+  "AdeQc.tier": "prod",
+  "AdeQc.catalog": "anvil14",
+  "AdeQc.dry_run": false,
+  "AdeQc.allow_controlled_access": false,
+  "AdeQc.docker": "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.2.1"
+}

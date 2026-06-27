@@ -49,7 +49,7 @@ to run a different tag.
 
 | WDL | CLI command | Purpose |
 |---|---|---|
-| `qc.wdl` | `qc` | Full export/import + QC: export a TDR snapshot to a **new** Analysis Workspace and verify it. **Open-access only.** |
+| `ade_qc.wdl` | `ade-qc` | Full export/import + QC via the **ADE/Azul** export: export a TDR snapshot to a **new** Analysis Workspace and verify it. Open-access by default; controlled-access via the opt-in. |
 | `compare.wdl` | `compare` | Re-QC an **existing** Analysis Workspace against its TDR snapshot (no import). |
 | `compare_ingest.wdl` | `compare-ingest` | Ingestion QC: submitter (ADSW) workspace vs TDR snapshot. |
 
@@ -65,10 +65,10 @@ Each has a matching `*.inputs.example.json`. Fill in `config`, the workspace/sna
   account in `email` ∪ `authorized_users`; each operator mints their own Azul token as themselves).
 - **`config` is a File input** — the same `config.yaml` the CLI uses, with **`adc_credentials_file: null`**
   so ADC falls back to that runtime identity. Store it in a bucket and pass its `gs://` path.
-- **`qc` is open-access by default**: Azul is queried anonymously (the consent gate enforces
+- **`ade-qc` is open-access by default**: Azul is queried anonymously (the consent gate enforces
   `consentCode == "NRES"`), so **no Azul token is needed**. `compare` / `compare-ingest` never touch Azul.
 
-### Controlled-access (`qc` only)
+### Controlled-access (`ade-qc` only)
 
 Controlled-access is **security-team approved** (no restrictions — all AnVIL data) and gated behind an
 explicit, default-off opt-in. To QC a controlled-access snapshot:
@@ -76,7 +76,7 @@ explicit, default-off opt-in. To QC a controlled-access snapshot:
 1. **Mint a fresh Azul token** locally: `anvil-data-qc azul-login --tier prod` (controlled data needs a
    token; it lasts ~1 h).
 2. **Upload the token file to a secure bucket**, e.g. `gs://fc-secure-…/azul-token-prod.txt`.
-3. **Set two `qc.wdl` inputs:** `allow_controlled_access = true` and `azul_token` = that `gs://` token
+3. **Set two `ade_qc.wdl` inputs:** `allow_controlled_access = true` and `azul_token` = that `gs://` token
    file. The run then permits any `consentCode` and logs a controlled-access audit `WARNING`.
 
 **Batch + token timing:** the token is used only at each run's *early manifest step* (the long import
@@ -104,6 +104,6 @@ Terra runs Cromwell; validate with the matching [womtool](https://github.com/bro
 before pushing (this repo was validated with womtool 92):
 
 ```bash
-java -jar womtool-92.jar validate wdl/qc.wdl
-java -jar womtool-92.jar validate -i wdl/qc.inputs.example.json wdl/qc.wdl
+java -jar womtool-92.jar validate wdl/ade_qc.wdl
+java -jar womtool-92.jar validate -i wdl/ade_qc.inputs.example.json wdl/ade_qc.wdl
 ```

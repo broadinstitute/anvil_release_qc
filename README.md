@@ -54,7 +54,7 @@ Three operations, one per concern:
 | Command | Verifies | Pipeline hop | Typically run by |
 |---|---|---|---|
 | **`compare-ingest`** | every submitter table was ingested into TDR with the same row count | ADSW → TDR | Operations (ingestion) |
-| **`qc`** | a snapshot exports/imports into a new Analysis Workspace, then that workspace matches the snapshot (tables, rows, columns, auth domain) | TDR → ADE → AW | Operations / data QA |
+| **`ade-qc`** | a snapshot exports/imports into a new Analysis Workspace via the **ADE/Azul** export, then that workspace matches the snapshot (tables, rows, columns, auth domain) | TDR → ADE → AW | Operations / data QA |
 | **`compare`** | an existing Analysis Workspace still matches its snapshot (no re-import) | AW ↔ TDR | Data QA |
 
 All runs are **open-access only** by default — a fail-closed safety gate blocks anything else (see
@@ -111,10 +111,10 @@ anvil-data-qc compare-ingest \
   --tier prod
 ```
 
-**Full release QC — export a snapshot to a new workspace and verify it:**
+**Full release QC (ADE/Azul export) — export a snapshot to a new workspace and verify it:**
 
 ```bash
-anvil-data-qc qc --snapshot-id <tdr-snapshot-id> --tier prod --catalog anvil14
+anvil-data-qc ade-qc --snapshot-id <tdr-snapshot-id> --tier prod --catalog anvil14
 #   add --dry-run to validate the export side only (no workspace created, no import run)
 ```
 
@@ -183,9 +183,9 @@ that risk:
 
 **Controlled-access** was reviewed and **approved by the Broad security team** (no restrictions — all
 AnVIL data). It's enabled by an **explicit, default-off opt-in** — `--allow-controlled-access` (CLI) /
-`allow_controlled_access` (`qc.wdl`) — so the default stays fail-closed (open-access only) and every
+`allow_controlled_access` (`ade_qc.wdl`) — so the default stays fail-closed (open-access only) and every
 controlled-access run is a deliberate, audit-logged choice; layers 2–4 apply regardless. Controlled
-runs also need an Azul token (the `qc.wdl` `azul_token` input) — see [`wdl/README.md`](wdl/README.md).
+runs also need an Azul token (the `ade_qc.wdl` `azul_token` input) — see [`wdl/README.md`](wdl/README.md).
 
 → See [`src/anvil_data_qc/safety.py`](src/anvil_data_qc/safety.py) and risk **R8** in
 [`docs/risk_register.md`](docs/risk_register.md).
@@ -193,7 +193,7 @@ runs also need an Azul token (the `qc.wdl` `azul_token` input) — see [`wdl/REA
 ## Running in Terra (Docker + WDL)
 
 The same code runs non-interactively in Terra as a **code-only Docker image** driven by three **WDL**
-workflows (`qc`, `compare`, `compare-ingest`). Credentials come from the workspace's runtime service
+workflows (`ade-qc`, `compare`, `compare-ingest`). Credentials come from the workspace's runtime service
 account; the per-tier config is a workflow input; each run emits a **`qc_passed`** output you can
 sort/filter to triage failures across many datasets at once.
 
@@ -204,7 +204,7 @@ sort/filter to triage failures across many datasets at once.
 ```
 anvil-data-qc/
 ├── src/anvil_data_qc/        # the importable package (all logic)
-│   ├── cli.py                #   CLI entrypoint: qc, compare, compare-ingest, azul-login
+│   ├── cli.py                #   CLI entrypoint: ade-qc, compare, compare-ingest, azul-login
 │   ├── config.py             #   YAML + pydantic config; tier resolution
 │   ├── auth.py, azul_auth.py #   Google ADC + identity guard; Azul token capture
 │   ├── safety.py             #   the fail-closed safety model (consent gate, signed-URL containment, …)

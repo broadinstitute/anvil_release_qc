@@ -1,6 +1,6 @@
 """Command-line entrypoint (Typer).
 
-anvil-data-qc qc --snapshot-id <id> [--tier dev|prod] [--catalog <cat>] [--dry-run] [--config path]
+anvil-data-qc ade-qc --snapshot-id <id> [--tier dev|prod] [--catalog <cat>] [--dry-run] [--config path]
 anvil-data-qc compare --snapshot-id <id> --workspace-namespace <ns> --workspace-name <name> [...]
 anvil-data-qc compare-ingest --submitter-workspace-namespace <ns> --submitter-workspace-name <name> \
     --snapshot-id <id> [--tier dev|prod] [--config path]
@@ -28,7 +28,7 @@ from .clients.tdr import TdrClient, snapshot_bigquery_access
 from .compare.ingest import run_ingest_comparison
 from .compare.qc import run_qc_comparison
 from .config import load_config, resolve_tier
-from .pipeline import run_qc
+from .pipeline import run_ade_qc
 from .safety import SafetyError
 
 app = typer.Typer(
@@ -42,8 +42,8 @@ def main() -> None:
     """AnVIL Data Release QC commands."""
 
 
-@app.command()
-def qc(
+@app.command("ade-qc")
+def ade_qc(
     snapshot_id: str = typer.Option(
         ..., "--snapshot-id", "-s", help="TDR snapshot id (the input / system of record)."
     ),
@@ -77,9 +77,9 @@ def qc(
         help="Path to an Azul token file, overriding the tier's azul_token_file (used by the WDL).",
     ),
 ) -> None:
-    """Run the export/import + QC flow for one TDR snapshot."""
+    """Run the ADE/Azul export/import + QC flow for one TDR snapshot."""
     try:
-        result = run_qc(
+        result = run_ade_qc(
             snapshot_id=snapshot_id,
             tier_name=tier,
             config_path=config,
