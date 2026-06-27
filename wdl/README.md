@@ -50,7 +50,7 @@ to run a different tag.
 | WDL | CLI command | Purpose |
 |---|---|---|
 | `ade_qc.wdl` | `ade-qc` | Full export/import + QC via the **ADE/Azul** export: export a TDR snapshot to a **new** Analysis Workspace and verify it. Open-access by default; controlled-access via the opt-in. |
-| `tdr_qc.wdl` | `tdr-qc` | Same QC via a **direct TDR export** (no ADE/Azul) — for very large datasets that fail ADE export. **No Azul token needed** (Terra creds throughout). Open-access only for now. |
+| `tdr_qc.wdl` | `tdr-qc` | Same QC via a **direct TDR export** (no ADE/Azul) — for very large datasets that fail ADE export. **No Azul token needed** (Terra creds throughout). Open-access by default; controlled-access via the opt-in. |
 | `compare.wdl` | `compare` | Re-QC an **existing** Analysis Workspace against its TDR snapshot (no import). |
 | `compare_ingest.wdl` | `compare-ingest` | Ingestion QC: submitter (ADSW) workspace vs TDR snapshot. |
 
