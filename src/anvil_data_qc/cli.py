@@ -1,6 +1,7 @@
 """Command-line entrypoint (Typer).
 
 anvil-data-qc ade-qc --snapshot-id <id> [--tier dev|prod] [--catalog <cat>] [--dry-run] [--config path]
+anvil-data-qc tdr-qc --snapshot-id <id> [--tier dev|prod] [--dry-run] [--config path]
 anvil-data-qc compare --snapshot-id <id> --workspace-namespace <ns> --workspace-name <name> [...]
 anvil-data-qc compare-ingest --submitter-workspace-namespace <ns> --submitter-workspace-name <name> \
     --snapshot-id <id> [--tier dev|prod] [--config path]
@@ -28,7 +29,7 @@ from .clients.tdr import TdrClient, snapshot_bigquery_access
 from .compare.ingest import run_ingest_comparison
 from .compare.qc import run_qc_comparison
 from .config import load_config, resolve_tier
-from .pipeline import run_ade_qc
+from .pipeline import run_ade_qc, run_tdr_qc
 from .safety import SafetyError
 
 app = typer.Typer(
@@ -87,6 +88,56 @@ def ade_qc(
             catalog=catalog,
             allow_controlled_access=allow_controlled_access,
             azul_token_file=azul_token_file,
+        )
+    except SafetyError as exc:
+        # Safety gate (consent / signed-URL hand-off; see safety.py). Clean message, no traceback.
+        typer.secho(str(exc), fg=typer.colors.RED, err=True)
+        raise typer.Exit(2) from exc
+    if (
+        result.get("qc_passed") is False
+    ):  # absent on dry runs; only a real QC failure exits non-zero
+        raise typer.Exit(1)
+
+
+@app.command("tdr-qc")
+def tdr_qc(
+    snapshot_id: str = typer.Option(
+        ..., "--snapshot-id", "-s", help="TDR snapshot id (the input / system of record)."
+    ),
+    tier: Optional[str] = typer.Option(
+        None,
+        "--tier",
+        "-t",
+        help="Tier to run against (dev|prod). Defaults to the config's default_tier.",
+    ),
+    config: Path = typer.Option(
+        Path("config/config.yaml"), "--config", "-c", help="Path to the YAML config file."
+    ),
+    dry_run: bool = typer.Option(
+        False,
+        "--dry-run",
+        help="Validate the export side only (TDR snapshot export); create no workspace, run no import.",
+    ),
+    allow_controlled_access: bool = typer.Option(
+        False,
+        "--allow-controlled-access",
+        help="Opt in to controlled-access snapshots. NOTE: controlled-access tdr-qc is not yet enabled "
+        "(pending permission-sync confirmation); open-access only for now.",
+    ),
+) -> None:
+    """Run the TDR direct-export + QC flow for one TDR snapshot.
+
+    Exports the snapshot directly from TDR (no ADE/Azul, no Azul token), imports it into a new Analysis
+    Workspace, and verifies it (AW vs snapshot + auth-domain) -- for very large datasets that fail to
+    export via ADE/Azul. Open-access only for now.
+    """
+    try:
+        result = run_tdr_qc(
+            snapshot_id=snapshot_id,
+            tier_name=tier,
+            config_path=config,
+            dry_run=dry_run,
+            allow_controlled_access=allow_controlled_access,
         )
     except SafetyError as exc:
         # Safety gate (consent / signed-URL hand-off; see safety.py). Clean message, no traceback.

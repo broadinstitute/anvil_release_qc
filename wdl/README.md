@@ -50,6 +50,7 @@ to run a different tag.
 | WDL | CLI command | Purpose |
 |---|---|---|
 | `ade_qc.wdl` | `ade-qc` | Full export/import + QC via the **ADE/Azul** export: export a TDR snapshot to a **new** Analysis Workspace and verify it. Open-access by default; controlled-access via the opt-in. |
+| `tdr_qc.wdl` | `tdr-qc` | Same QC via a **direct TDR export** (no ADE/Azul) — for very large datasets that fail ADE export. **No Azul token needed** (Terra creds throughout). Open-access only for now. |
 | `compare.wdl` | `compare` | Re-QC an **existing** Analysis Workspace against its TDR snapshot (no import). |
 | `compare_ingest.wdl` | `compare-ingest` | Ingestion QC: submitter (ADSW) workspace vs TDR snapshot. |
 
@@ -67,6 +68,11 @@ Each has a matching `*.inputs.example.json`. Fill in `config`, the workspace/sna
   so ADC falls back to that runtime identity. Store it in a bucket and pass its `gs://` path.
 - **`ade-qc` is open-access by default**: Azul is queried anonymously (the consent gate enforces
   `consentCode == "NRES"`), so **no Azul token is needed**. `compare` / `compare-ingest` never touch Azul.
+- **`tdr-qc` never touches Azul** — it exports directly from TDR using the runtime Terra credentials, so
+  it needs **no Azul token at all** (no `azul_token` input). It is **open-access only for now**:
+  controlled-access `tdr-qc` is blocked pending confirmation of the import's permission-sync behavior
+  (see [`docs/tdr_export_flow.md`](../docs/tdr_export_flow.md)); `allow_controlled_access` is accepted
+  for parity but still blocks. Simpler inputs than `ade_qc.wdl` (no `catalog`, no `azul_token`).
 
 ### Controlled-access (`ade-qc` only)
 
@@ -106,4 +112,6 @@ before pushing (this repo was validated with womtool 92):
 ```bash
 java -jar womtool-92.jar validate wdl/ade_qc.wdl
 java -jar womtool-92.jar validate -i wdl/ade_qc.inputs.example.json wdl/ade_qc.wdl
+java -jar womtool-92.jar validate wdl/tdr_qc.wdl
+java -jar womtool-92.jar validate -i wdl/tdr_qc.inputs.example.json wdl/tdr_qc.wdl
 ```

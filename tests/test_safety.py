@@ -5,9 +5,15 @@ import pytest
 from anvil_data_qc.clients.tdr import snapshot_consent_code
 from anvil_data_qc.safety import (
     ControlledAccessNotApprovedError,
+    SignedUrl,
+    SignedUrlProvenanceError,
+    TdrControlledAccessNotYetEnabledError,
     assert_consent_permitted,
     assert_open_access,
+    assert_tdr_qc_permitted,
     is_open_access,
+    tdr_export_allowed_prefixes,
+    verify_pfb_handoff,
 )
 
 
@@ -54,3 +60,76 @@ def test_consent_gate_blocks_controlled_when_opt_in_off(code):
 def test_consent_gate_allows_any_code_when_opt_in_on(code):
     # Opt-in on (security-approved): any consentCode -- including empty/unknown -- is permitted (no raise).
     assert_consent_permitted("snap-1", code, allow_controlled_access=True)
+
+
+# --- assert_tdr_qc_permitted: open-access ONLY for now (controlled blocked even with the opt-in) ---
+
+
+def test_tdr_qc_gate_open_access_passes():
+    # NRES proceeds regardless of the opt-in.
+    assert_tdr_qc_permitted("snap-1", "NRES", allow_controlled_access=False)
+    assert_tdr_qc_permitted("snap-1", "NRES", allow_controlled_access=True)
+
+
+@pytest.mark.parametrize("code", ["", None, "GRU", "phs000123"])
+def test_tdr_qc_gate_blocks_controlled_opt_in_off(code):
+    # Default fail-closed, like ade-qc.
+    with pytest.raises(ControlledAccessNotApprovedError):
+        assert_tdr_qc_permitted("snap-1", code, allow_controlled_access=False)
+
+
+@pytest.mark.parametrize("code", ["", None, "GRU", "phs000123"])
+def test_tdr_qc_gate_blocks_controlled_even_with_opt_in(code):
+    # Unlike ade-qc, tdr-qc blocks controlled-access ENTIRELY for now -- even with the opt-in --
+    # pending the tdrSyncPermissions confirmation.
+    with pytest.raises(TdrControlledAccessNotYetEnabledError):
+        assert_tdr_qc_permitted("snap-1", code, allow_controlled_access=True)
+
+
+# --- TDR export provenance (layer 3): per-snapshot export bucket on GCS ---
+
+
+def test_tdr_export_allowed_prefixes_is_per_snapshot_bucket():
+    assert tdr_export_allowed_prefixes("datarepo-13858a9f") == (
+        "https://storage.googleapis.com/datarepo-13858a9f-snapshot-export-bucket/",
+    )
+
+
+def _tdr_handoff(url):
+    # Destination is fine (same tier); exercise the provenance check against the per-snapshot bucket.
+    verify_pfb_handoff(
+        SignedUrl(url),
+        tier_name="prod",
+        expected_firecloud_host="api.firecloud.org",
+        destination_host="api.firecloud.org",
+        allowed_prefixes=tdr_export_allowed_prefixes("datarepo-13858a9f"),
+    )
+
+
+def test_tdr_handoff_accepts_matching_bucket():
+    _tdr_handoff(
+        "https://storage.googleapis.com/datarepo-13858a9f-snapshot-export-bucket/job1/manifest.json"
+        "?X-Goog-Signature=z"
+    )  # no raise
+
+
+def test_tdr_handoff_rejects_wrong_bucket():
+    with pytest.raises(SignedUrlProvenanceError):
+        _tdr_handoff(
+            "https://storage.googleapis.com/datarepo-OTHER-snapshot-export-bucket/job1/manifest.json?sig=z"
+        )
+
+
+def test_tdr_handoff_rejects_sibling_bucket_prefix():
+    # The trailing "/" anchors the prefix at the bucket boundary: a longer sibling name must not match.
+    with pytest.raises(SignedUrlProvenanceError):
+        _tdr_handoff(
+            "https://storage.googleapis.com/datarepo-13858a9f-snapshot-export-bucket-evil/job1/manifest.json?sig=z"
+        )
+
+
+def test_tdr_handoff_rejects_non_gcs_host():
+    with pytest.raises(SignedUrlProvenanceError):
+        _tdr_handoff(
+            "https://evil.example/datarepo-13858a9f-snapshot-export-bucket/job1/manifest.json?sig=z"
+        )

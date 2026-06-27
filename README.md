@@ -49,12 +49,13 @@ This tool replaces the manual checks with **thorough, API-driven automation** th
 
 ## What it does
 
-Three operations, one per concern:
+The operations, one per concern (two routes for the release export):
 
 | Command | Verifies | Pipeline hop | Typically run by |
 |---|---|---|---|
 | **`compare-ingest`** | every submitter table was ingested into TDR with the same row count | ADSW → TDR | Operations (ingestion) |
 | **`ade-qc`** | a snapshot exports/imports into a new Analysis Workspace via the **ADE/Azul** export, then that workspace matches the snapshot (tables, rows, columns, auth domain) | TDR → ADE → AW | Operations / data QA |
+| **`tdr-qc`** | the same end result via a **direct TDR export** (no ADE/Azul) — for very large datasets that fail ADE export; open-access only for now | TDR → AW | Operations / data QA |
 | **`compare`** | an existing Analysis Workspace still matches its snapshot (no re-import) | AW ↔ TDR | Data QA |
 
 All runs are **open-access only** by default — a fail-closed safety gate blocks anything else (see
@@ -116,6 +117,13 @@ anvil-data-qc compare-ingest \
 ```bash
 anvil-data-qc ade-qc --snapshot-id <tdr-snapshot-id> --tier prod --catalog anvil14
 #   add --dry-run to validate the export side only (no workspace created, no import run)
+```
+
+**Same QC via a direct TDR export** (no ADE/Azul; for very large datasets that fail ADE export; open-access only for now):
+
+```bash
+anvil-data-qc tdr-qc --snapshot-id <tdr-snapshot-id> --tier prod
+#   uses Terra credentials throughout — no Azul token; add --dry-run for the export side only
 ```
 
 **Re-check an existing Analysis Workspace against its snapshot:**
@@ -192,8 +200,8 @@ runs also need an Azul token (the `ade_qc.wdl` `azul_token` input) — see [`wdl
 
 ## Running in Terra (Docker + WDL)
 
-The same code runs non-interactively in Terra as a **code-only Docker image** driven by three **WDL**
-workflows (`ade-qc`, `compare`, `compare-ingest`). Credentials come from the workspace's runtime service
+The same code runs non-interactively in Terra as a **code-only Docker image** driven by four **WDL**
+workflows (`ade-qc`, `tdr-qc`, `compare`, `compare-ingest`). Credentials come from the workspace's runtime service
 account; the per-tier config is a workflow input; each run emits a **`qc_passed`** output you can
 sort/filter to triage failures across many datasets at once.
 
@@ -204,7 +212,7 @@ sort/filter to triage failures across many datasets at once.
 ```
 anvil-data-qc/
 ├── src/anvil_data_qc/        # the importable package (all logic)
-│   ├── cli.py                #   CLI entrypoint: ade-qc, compare, compare-ingest, azul-login
+│   ├── cli.py                #   CLI entrypoint: ade-qc, tdr-qc, compare, compare-ingest, azul-login
 │   ├── config.py             #   YAML + pydantic config; tier resolution
 │   ├── auth.py, azul_auth.py #   Google ADC + identity guard; Azul token capture
 │   ├── safety.py             #   the fail-closed safety model (consent gate, signed-URL containment, …)
@@ -241,6 +249,7 @@ ruff check . && ruff format --check .   # lint + format
 - [`CLAUDE.md`](CLAUDE.md) — architecture, design decisions, conventions.
 - [`docs/services.md`](docs/services.md) — service registry (repos, OpenAPI specs, per-tier URLs).
 - [`docs/export_import_flow.md`](docs/export_import_flow.md) — the resolved ADE→Terra export/import API flow.
+- [`docs/tdr_export_flow.md`](docs/tdr_export_flow.md) — the resolved TDR-direct→Terra export/import API flow (`tdr-qc`).
 - [`docs/comparison.md`](docs/comparison.md) — what the comparisons check, and their limits.
 - [`docs/risk_register.md`](docs/risk_register.md) — tracked project risks (incl. R8, the DMI risk).
 - [`docs/capturing_http_traffic.md`](docs/capturing_http_traffic.md) — capturing & scrubbing HAR flows.

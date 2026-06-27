@@ -8,9 +8,15 @@ from anvil_data_qc.clients.azul import AzulClient
 from anvil_data_qc.clients.base import BaseClient
 from anvil_data_qc.clients.firecloud import FirecloudClient, import_job_id
 from anvil_data_qc.clients.rawls import workspace_auth_domains
-from anvil_data_qc.clients.tdr import snapshot_bigquery_access, snapshot_name
+from anvil_data_qc.clients.tdr import (
+    TdrClient,
+    export_job_id,
+    export_manifest_url,
+    snapshot_bigquery_access,
+    snapshot_name,
+)
 from anvil_data_qc.logging_setup import LOGGER_NAME
-from anvil_data_qc.safety import BearerDestinationError
+from anvil_data_qc.safety import BearerDestinationError, SignedUrl
 
 
 class _Resp:
@@ -105,6 +111,128 @@ def test_import_job_id():
     assert import_job_id({"id": "xyz"}) == "xyz"
     with pytest.raises(ValueError):
         import_job_id({})
+
+
+def test_submit_import_job_defaults_to_pfb(monkeypatch):
+    client = FirecloudClient("https://fc.example", lambda: "token")
+    captured = {}
+
+    def fake_request(method, path, **kwargs):
+        captured["path"] = path
+        captured["body"] = kwargs.get("json_body")
+        return _Resp({"jobId": "j1"})
+
+    monkeypatch.setattr(client, "request", fake_request)
+    client.submit_import_job("ns", "ws", SignedUrl("https://s3.example/m.avro?X-Amz-Signature=x"))
+    assert captured["path"] == "/api/workspaces/ns/ws/importJob"
+    # ade-qc default: pfb / None; reveal() happens at this single site.
+    assert captured["body"] == {
+        "url": "https://s3.example/m.avro?X-Amz-Signature=x",
+        "filetype": "pfb",
+        "options": None,
+    }
+
+
+def test_submit_import_job_tdrexport_options(monkeypatch):
+    client = FirecloudClient("https://fc.example", lambda: "token")
+    captured = {}
+
+    def fake_request(method, path, **kwargs):
+        captured["body"] = kwargs.get("json_body")
+        return _Resp({"jobId": "j2"})
+
+    monkeypatch.setattr(client, "request", fake_request)
+    client.submit_import_job(
+        "ns",
+        "ws",
+        SignedUrl("https://storage.googleapis.com/b/manifest.json?X-Goog-Signature=x"),
+        filetype="tdrexport",
+        options={"tdrSyncPermissions": False},
+    )
+    assert captured["body"]["filetype"] == "tdrexport"
+    assert captured["body"]["options"] == {"tdrSyncPermissions": False}
+    assert (
+        captured["body"]["url"]
+        == "https://storage.googleapis.com/b/manifest.json?X-Goog-Signature=x"
+    )
+
+
+# --- TDR snapshot export (tdr-qc) ---
+
+
+def test_tdr_export_snapshot_params(monkeypatch):
+    client = TdrClient("https://tdr.example", lambda: "token")
+    calls = []
+
+    def fake_request(method, path, **kwargs):
+        calls.append((method, path, kwargs.get("params")))
+        return _Resp({"id": "job-1", "job_status": "running", "status_code": 202})
+
+    monkeypatch.setattr(client, "request", fake_request)
+    job = client.export_snapshot("snap-1")
+    assert export_job_id(job) == "job-1"
+    method, path, params = calls[0]
+    assert method == "GET" and path == "/api/repository/v1/snapshots/snap-1/export"
+    # Bools must be lowercase strings for TDR (not Python's "True"/"False").
+    assert params == {"exportGsPaths": "false", "validatePrimaryKeyUniqueness": "true"}
+
+
+def test_tdr_wait_for_export_job_succeeds(monkeypatch):
+    client = TdrClient("https://tdr.example", lambda: "token")
+    statuses = iter(
+        [{"job_status": "running"}, {"job_status": "running"}, {"job_status": "succeeded"}]
+    )
+    monkeypatch.setattr(client, "get_job", lambda jid: next(statuses))
+    monkeypatch.setattr("anvil_data_qc.clients.tdr.time.sleep", lambda _s: None)
+    job = client.wait_for_export_job("job-1", poll_interval=0)
+    assert job["job_status"] == "succeeded"
+
+
+def test_tdr_wait_for_export_job_raises_on_failure(monkeypatch):
+    client = TdrClient("https://tdr.example", lambda: "token")
+    monkeypatch.setattr(client, "get_job", lambda jid: {"job_status": "failed"})
+    monkeypatch.setattr("anvil_data_qc.clients.tdr.time.sleep", lambda _s: None)
+    with pytest.raises(RuntimeError):
+        client.wait_for_export_job("job-1", poll_interval=0)
+
+
+def test_export_job_id_missing_raises():
+    with pytest.raises(ValueError):
+        export_job_id({"job_status": "running"})
+
+
+def test_export_manifest_url_extracts_signed_manifest():
+    bucket = "https://storage.googleapis.com/datarepo-abc-snapshot-export-bucket/job1"
+    result = {
+        "format": {
+            "parquet": {
+                "manifest": f"{bucket}/manifest.json?X-Goog-Signature=zzz",
+                # per-table parquet paths are present but NOT what the import consumes:
+                "location": {
+                    "tables": [
+                        {
+                            "name": "sample",
+                            "paths": [f"{bucket}/sample/s.parquet?X-Goog-Signature=q"],
+                        }
+                    ]
+                },
+            }
+        }
+    }
+    signed = export_manifest_url(result)
+    assert (
+        signed.reveal() == f"{bucket}/manifest.json?X-Goog-Signature=zzz"
+    )  # the manifest, wrapped
+    assert (
+        signed.location == f"{bucket}/manifest.json"
+    )  # signed query dropped from the safe-to-log form
+
+
+def test_export_manifest_url_missing_raises():
+    with pytest.raises(ValueError):
+        export_manifest_url({"format": {"parquet": {"location": {"tables": []}}}})  # no manifest
+    with pytest.raises(ValueError):
+        export_manifest_url({})
 
 
 # --- TDR + Rawls extraction helpers ---

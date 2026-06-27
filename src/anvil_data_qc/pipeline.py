@@ -1,21 +1,30 @@
 """End-to-end QC pipeline orchestration.
 
-Implements the ADE/Azul export/import flow from docs/export_import_flow.md:
+Two export/import flows share the same QC tail; each differs only in how it produces the contained
+signed URL handed to the Terra import:
 
-    TDR retrieveSnapshot -> BigQuery anvil_dataset.dataset_id -> Azul manifest (verbatim.pfb, poll)
-    -> Rawls createWorkspace (authorizationDomain: []) -> Firecloud importJob -> poll to success
-    -> QC: AW-vs-snapshot table comparison (T1-T2) + auth-domain verification.
+- **ade-qc** (docs/export_import_flow.md): TDR retrieveSnapshot -> BigQuery anvil_dataset.dataset_id
+  -> Azul manifest (verbatim.pfb, poll) -> [shared tail].
+- **tdr-qc** (docs/tdr_export_flow.md): TDR retrieveSnapshot -> TDR snapshot export (poll) -> signed
+  manifest.json -> [shared tail].
+
+The **shared tail** (``_create_import_and_qc``) is: Rawls createWorkspace (authorizationDomain: [])
+-> Firecloud importJob -> poll to success -> QC (AW-vs-snapshot table comparison T1-T2 + auth-domain
+verification). ade-qc uses Azul + an Azul token; tdr-qc uses Terra/ADC tokens throughout.
 
 End-to-end execution requires real per-tier ADC credentials and a real TDR snapshot, and creates a
-real (retained) workspace -- run it against the dev tier.
+real (retained) workspace.
 """
 
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 from urllib.parse import urlsplit
+
+from google.auth.credentials import Credentials
 
 from . import __version__
 from .auth import assert_tier_identity, bearer_token, credentials_for_tier
@@ -31,25 +40,156 @@ from .clients.firecloud import FirecloudClient, import_job_id
 from .clients.rawls import RawlsClient
 from .clients.tdr import (
     TdrClient,
+    export_job_id,
+    export_manifest_url,
     snapshot_bigquery_access,
     snapshot_consent_code,
     snapshot_name,
 )
 from .compare.qc import run_qc_comparison
-from .config import SERVICE_URLS, load_config, resolve_tier
+from .config import SERVICE_URLS, ResolvedTier, load_config, resolve_tier
 from .logging_setup import LOGGER_NAME, setup_logging, write_header
 from .safety import (
     SIGNED_URL_ALLOWED_PREFIXES,
     ControlledAccessNotApprovedError,
     SafetyError,
+    SignedUrl,
     assert_consent_permitted,
+    assert_tdr_qc_permitted,
     is_open_access,
+    tdr_export_allowed_prefixes,
     verify_pfb_handoff,
 )
 from .timing import stage_timer
-from .workspace import ADE_NAME_INFIX, workspace_name
+from .workspace import ADE_NAME_INFIX, TDR_NAME_INFIX, workspace_name
 
 logger = logging.getLogger(LOGGER_NAME)
+
+# tdr-qc importJob shape (Terra import of a TDR snapshot export; see docs/tdr_export_flow.md).
+TDR_IMPORT_FILETYPE = "tdrexport"
+# ``tdrSyncPermissions`` mirrors the open-access capture (False). tdr-qc is open-access-ONLY for now
+# (controlled-access is blocked by safety.assert_tdr_qc_permitted), so syncing nothing is correct here.
+# The CORRECT value for CONTROLLED data is unconfirmed (likely True) and MUST be resolved before
+# enabling controlled-access tdr-qc -- do NOT flip this without that confirmation. See risk R8 and
+# docs/tdr_export_flow.md.
+TDR_SYNC_PERMISSIONS = False
+
+
+@dataclass(frozen=True)
+class _RunSetup:
+    """Shared per-run setup: resolved tier, ADC credentials, a bearer-token provider, the log file."""
+
+    tier: ResolvedTier
+    creds: Credentials
+    google_token: Callable[[], str]
+    log_file: Path
+
+
+def _setup_run(
+    snapshot_id: str, tier_name: Optional[str], config_path: Path, log_dir: Path
+) -> _RunSetup:
+    """Load config, start logging, load ADC creds, and run the tier identity guard (shared by both flows)."""
+    config = load_config(config_path)
+    tier = resolve_tier(config, tier_name)
+
+    _logger, log_file = setup_logging(log_dir, tier.name, snapshot_id)
+    write_header(
+        _logger,
+        version=__version__,
+        tier=tier.name,
+        snapshot_id=snapshot_id,
+        billing_project=tier.billing_project,
+        log_file=str(log_file),
+    )
+
+    creds = credentials_for_tier(tier)
+    assert_tier_identity(creds, tier)
+
+    def google_token() -> str:
+        return bearer_token(creds)
+
+    return _RunSetup(tier=tier, creds=creds, google_token=google_token, log_file=log_file)
+
+
+def _create_import_and_qc(
+    *,
+    setup: _RunSetup,
+    snapshot_id: str,
+    name: str,
+    bq_project: str,
+    bq_dataset: str,
+    signed_url: SignedUrl,
+    filetype: str,
+    import_options: Optional[dict],
+    allowed_prefixes: tuple[str, ...],
+    infix: str,
+    description: str,
+    durations: dict[str, float],
+) -> dict:
+    """Shared tail for both flows: create the workspace, hand off the signed URL to the import, wait,
+    then QC the workspace against the snapshot.
+
+    Identical for ade-qc and tdr-qc -- only the signed-URL source, importJob ``filetype``/``options``,
+    provenance ``allowed_prefixes``, workspace ``infix``, and ``description`` differ (passed in).
+    """
+    tier = setup.tier
+    google_token = setup.google_token
+
+    # Rawls: create the destination workspace (empty auth domain; the import applies it).
+    ws_name = workspace_name(tier.email, name, infix=infix)
+    rawls = RawlsClient(tier.url("rawls"), google_token)
+    logger.info("Creating workspace %s/%s", tier.billing_project, ws_name)
+    with stage_timer("workspace_create", durations):
+        rawls.create_workspace(tier.billing_project, ws_name, description=description)
+
+    # Firecloud: import and wait for the job to succeed. Dev Terra can be slow (createWorkspace alone
+    # took ~20s); give the import submit/polls headroom.
+    firecloud = FirecloudClient(tier.url("firecloud"), google_token, timeout=180)
+    # Verify the signed URL is delivered only to this tier's import service, and is from the expected
+    # source, before handing it over -- defense against a controlled signed URL reaching a wrong/dev
+    # destination (a Federal DMI). See safety.verify_pfb_handoff.
+    verify_pfb_handoff(
+        signed_url,
+        tier_name=tier.name,
+        expected_firecloud_host=urlsplit(SERVICE_URLS[tier.name]["firecloud"]).netloc,
+        destination_host=urlsplit(firecloud.base_url).netloc,
+        allowed_prefixes=allowed_prefixes,
+    )
+    with stage_timer("import", durations):
+        submit = firecloud.submit_import_job(
+            tier.billing_project, ws_name, signed_url, filetype=filetype, options=import_options
+        )
+        job_id = import_job_id(submit)
+        logger.info("Import job submitted: %s", job_id)
+        firecloud.wait_for_import(tier.billing_project, ws_name, job_id)
+
+    logger.info("Export/import complete. Workspace: %s/%s", tier.billing_project, ws_name)
+    logger.info("Stage durations: %s", {k: round(v, 1) for k, v in durations.items()})
+
+    # QC: compare the AW data tables to the TDR snapshot (T1-T2) and verify the auth domain.
+    qc = run_qc_comparison(
+        creds=setup.creds,
+        tier=tier,
+        snapshot_id=snapshot_id,
+        bq_project=bq_project,
+        bq_dataset=bq_dataset,
+        namespace=tier.billing_project,
+        workspace_name=ws_name,
+        token_provider=google_token,
+    )
+    logger.info("QC report:\n%s", qc.render())
+    if not qc.passed:
+        logger.warning(
+            "QC FAILED for %s/%s -- see the report above.", tier.billing_project, ws_name
+        )
+    return {
+        "workspace_namespace": tier.billing_project,
+        "workspace_name": ws_name,
+        "snapshot_name": name,
+        "qc_passed": qc.passed,
+        "durations": durations,
+        "log_file": str(setup.log_file),
+    }
 
 
 def run_ade_qc(
@@ -71,24 +211,9 @@ def run_ade_qc(
     closed, open-access only; see ``safety.assert_consent_permitted``). ``azul_token_file`` overrides
     the tier's configured Azul token path (used by the WDL to pass a localized token file).
     """
-    config = load_config(config_path)
-    tier = resolve_tier(config, tier_name)
-
-    _logger, log_file = setup_logging(log_dir, tier.name, snapshot_id)
-    write_header(
-        _logger,
-        version=__version__,
-        tier=tier.name,
-        snapshot_id=snapshot_id,
-        billing_project=tier.billing_project,
-        log_file=str(log_file),
-    )
-
-    creds = credentials_for_tier(tier)
-    assert_tier_identity(creds, tier)
-
-    def google_token() -> str:
-        return bearer_token(creds)
+    setup = _setup_run(snapshot_id, tier_name, config_path, log_dir)
+    tier = setup.tier
+    google_token = setup.google_token
 
     # Azul token: read + validate up front (fail fast before any TDR/BigQuery work). Azul rejects
     # gcloud ADC tokens, so it needs its own interactive access token (see `azul-login`). With no
@@ -158,7 +283,7 @@ def run_ade_qc(
     logger.info("Snapshot '%s' -> BigQuery %s.%s", name, bq_project, bq_dataset)
 
     # 2. BigQuery: resolve the Azul dataset_id from the snapshot (system of record).
-    dataset_id = resolve_dataset_id(creds, bq_project, bq_dataset, tier.billing_project)
+    dataset_id = resolve_dataset_id(setup.creds, bq_project, bq_dataset, tier.billing_project)
 
     # 3. Azul: generate the PFB manifest and obtain the signed S3 URL (token validated above).
     durations: dict[str, float] = {}
@@ -180,66 +305,105 @@ def run_ade_qc(
             "dataset_id": dataset_id,
             "signed_url_location": location,
             "durations": durations,
-            "log_file": str(log_file),
+            "log_file": str(setup.log_file),
         }
 
-    # 4. Rawls: create the destination workspace (empty auth domain; import applies it).
-    ws_name = workspace_name(tier.email, name, infix=ADE_NAME_INFIX)
-    rawls = RawlsClient(tier.url("rawls"), google_token)
-    logger.info("Creating workspace %s/%s", tier.billing_project, ws_name)
-    with stage_timer("workspace_create", durations):
-        rawls.create_workspace(
-            tier.billing_project, ws_name, description=f"AnVIL Data Release QC export of {name}"
-        )
-
-    # 5. Firecloud: import the PFB and wait for the job to succeed.
-    # Dev Terra can be slow (createWorkspace alone took ~20s); give the import submit/polls headroom.
-    firecloud = FirecloudClient(tier.url("firecloud"), google_token, timeout=180)
-    # Verify the signed URL is delivered only to this tier's import service (and is from this tier's
-    # source) before handing it over -- defense against a controlled-access PFB reaching a wrong/dev
-    # destination (a Federal DMI). See safety.verify_pfb_handoff.
-    verify_pfb_handoff(
-        signed_url,
-        tier_name=tier.name,
-        expected_firecloud_host=urlsplit(SERVICE_URLS[tier.name]["firecloud"]).netloc,
-        destination_host=urlsplit(firecloud.base_url).netloc,
-        allowed_prefixes=SIGNED_URL_ALLOWED_PREFIXES.get(tier.name, ()),
-    )
-    with stage_timer("import", durations):
-        submit = firecloud.submit_import_job(tier.billing_project, ws_name, signed_url)
-        job_id = import_job_id(submit)
-        logger.info("Import job submitted: %s", job_id)
-        firecloud.wait_for_import(tier.billing_project, ws_name, job_id)
-
-    logger.info("Export/import complete. Workspace: %s/%s", tier.billing_project, ws_name)
-    logger.info(
-        "Stage durations — manifest: %.1fs, workspace: %.1fs, import: %.1fs",
-        durations.get("azul_manifest", 0.0),
-        durations.get("workspace_create", 0.0),
-        durations.get("import", 0.0),
-    )
-
-    # 6. QC: compare the AW data tables to the TDR snapshot (T1-T2) and verify the auth domain.
-    qc = run_qc_comparison(
-        creds=creds,
-        tier=tier,
+    return _create_import_and_qc(
+        setup=setup,
         snapshot_id=snapshot_id,
+        name=name,
         bq_project=bq_project,
         bq_dataset=bq_dataset,
-        namespace=tier.billing_project,
-        workspace_name=ws_name,
-        token_provider=google_token,
+        signed_url=signed_url,
+        filetype="pfb",
+        import_options=None,
+        allowed_prefixes=SIGNED_URL_ALLOWED_PREFIXES.get(tier.name, ()),
+        infix=ADE_NAME_INFIX,
+        description=f"AnVIL Data Release QC export of {name}",
+        durations=durations,
     )
-    logger.info("QC report:\n%s", qc.render())
-    if not qc.passed:
-        logger.warning(
-            "QC FAILED for %s/%s -- see the report above.", tier.billing_project, ws_name
+
+
+def run_tdr_qc(
+    snapshot_id: str,
+    tier_name: Optional[str],
+    config_path: Path,
+    log_dir: Path = Path("logs"),
+    dry_run: bool = False,
+    allow_controlled_access: bool = False,
+) -> dict:
+    """Run the TDR direct-export + QC flow for one TDR snapshot. Returns the created workspace + log path.
+
+    Exports the snapshot DIRECTLY from TDR (no ADE/Azul, no Azul token): TDR snapshot export -> signed
+    manifest.json -> Terra import (filetype ``tdrexport``) -> QC. Uses Terra/ADC tokens throughout. For
+    very large datasets that fail to export via ADE/Azul.
+
+    ``dry_run`` stops after the export manifest is obtained -- no workspace is created and no import is
+    run. ``allow_controlled_access`` is accepted for parity with ade-qc, but controlled-access tdr-qc is
+    **not yet enabled** (see ``safety.assert_tdr_qc_permitted``); only open-access snapshots run.
+    """
+    setup = _setup_run(snapshot_id, tier_name, config_path, log_dir)
+    tier = setup.tier
+    google_token = setup.google_token
+
+    # 1. TDR: retrieve the snapshot (name, consentCode, BigQuery access info).
+    tdr = TdrClient(tier.url("tdr"), google_token)
+    snapshot = tdr.retrieve_snapshot(snapshot_id)
+    name = snapshot_name(snapshot)
+
+    # SAFETY GATE (layer 1): tdr-qc is OPEN-ACCESS ONLY for now. Controlled-access is blocked entirely
+    # (even with allow_controlled_access) until the importJob tdrSyncPermissions value / tdrexport
+    # auth-domain behavior for controlled data is confirmed -- see safety.assert_tdr_qc_permitted. Runs
+    # before any export/signed URL is generated.
+    consent_code = snapshot_consent_code(snapshot)
+    try:
+        assert_tdr_qc_permitted(
+            snapshot_id, consent_code, allow_controlled_access=allow_controlled_access
         )
-    return {
-        "workspace_namespace": tier.billing_project,
-        "workspace_name": ws_name,
-        "snapshot_name": name,
-        "qc_passed": qc.passed,
-        "durations": durations,
-        "log_file": str(log_file),
-    }
+    except SafetyError as exc:
+        logger.error("%s", exc)
+        raise
+    logger.info("Consent gate OK: snapshot is open-access (consentCode=%r).", consent_code)
+
+    bq_project, bq_dataset = snapshot_bigquery_access(snapshot)
+    logger.info("Snapshot '%s' -> BigQuery %s.%s", name, bq_project, bq_dataset)
+
+    # 2-3. TDR: export the snapshot (async) and obtain the signed manifest.json URL.
+    durations: dict[str, float] = {}
+    with stage_timer("tdr_export", durations):
+        job = tdr.export_snapshot(snapshot_id)
+        job_id = export_job_id(job)
+        logger.info("TDR export job submitted: %s", job_id)
+        tdr.wait_for_export_job(job_id)
+        signed_url = export_manifest_url(tdr.get_job_result(job_id))
+
+    if dry_run:
+        location = signed_url.location  # scheme+host+path only; the signed query stays contained
+        logger.info(
+            "Dry run: export side validated (TDR snapshot export). Signed manifest URL at %s. "
+            "Skipping workspace creation and import.",
+            location,
+        )
+        return {
+            "dry_run": True,
+            "snapshot_name": name,
+            "bigquery": f"{bq_project}.{bq_dataset}",
+            "signed_url_location": location,
+            "durations": durations,
+            "log_file": str(setup.log_file),
+        }
+
+    return _create_import_and_qc(
+        setup=setup,
+        snapshot_id=snapshot_id,
+        name=name,
+        bq_project=bq_project,
+        bq_dataset=bq_dataset,
+        signed_url=signed_url,
+        filetype=TDR_IMPORT_FILETYPE,
+        import_options={"tdrSyncPermissions": TDR_SYNC_PERMISSIONS},
+        allowed_prefixes=tdr_export_allowed_prefixes(bq_project),
+        infix=TDR_NAME_INFIX,
+        description=f"AnVIL Data Release TDR-export QC of {name}",
+        durations=durations,
+    )

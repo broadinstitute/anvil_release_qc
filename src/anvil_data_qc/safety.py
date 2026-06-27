@@ -52,6 +52,10 @@ class ControlledAccessNotApprovedError(SafetyError):
     """Raised to block the pipeline on any snapshot that is not explicitly open-access."""
 
 
+class TdrControlledAccessNotYetEnabledError(SafetyError):
+    """Raised to block controlled-access ``tdr-qc`` until its permission/auth-domain behavior is confirmed."""
+
+
 def is_open_access(consent_code: Optional[str]) -> bool:
     """True only when ``consent_code`` is exactly ``"NRES"``.
 
@@ -89,6 +93,34 @@ def assert_consent_permitted(
     if allow_controlled_access:
         return
     assert_open_access(snapshot_id, consent_code)
+
+
+def assert_tdr_qc_permitted(
+    snapshot_id: str, consent_code: Optional[str], *, allow_controlled_access: bool
+) -> None:
+    """Consent gate for ``tdr-qc``: open-access only, for now.
+
+    Applies the same default-off ``allow_controlled_access`` gate as ade-qc, but **additionally blocks
+    controlled-access tdr-qc entirely -- even when ``allow_controlled_access`` is set** -- until the
+    correct Terra importJob ``tdrSyncPermissions`` value for controlled data (and whether ``tdrexport``
+    applies the snapshot's auth domain) is confirmed. The open-access capture used
+    ``tdrSyncPermissions: false``; mirroring that onto controlled data could leave the workspace
+    **under-protected (a Federal DMI)**. See docs/tdr_export_flow.md and risk R8.
+
+    Raises ``ControlledAccessNotApprovedError`` (opt-in off) or ``TdrControlledAccessNotYetEnabledError``
+    (opt-in on but controlled) for any non-open-access snapshot.
+    """
+    assert_consent_permitted(
+        snapshot_id, consent_code, allow_controlled_access=allow_controlled_access
+    )
+    if not is_open_access(consent_code):
+        raise TdrControlledAccessNotYetEnabledError(
+            f"Snapshot {snapshot_id} is controlled-access (consentCode={consent_code!r}). tdr-qc does "
+            "not yet support controlled-access data: the correct importJob 'tdrSyncPermissions' value "
+            "for controlled data (and whether tdrexport applies the auth domain) must be confirmed "
+            "first -- see docs/tdr_export_flow.md. Only open-access snapshots are supported by tdr-qc "
+            "currently."
+        )
 
 
 # --- Layer 2: secret containment ---
@@ -148,6 +180,18 @@ SIGNED_URL_ALLOWED_PREFIXES: dict[str, tuple[str, ...]] = {
         "https://s3.amazonaws.com/edu-ucsc-gi-platform-anvil-prod-storage-anvilprod.us-east-1/",
     ),
 }
+
+
+def tdr_export_allowed_prefixes(bq_project: str) -> tuple[str, ...]:
+    """Allowed signed-URL provenance for a TDR snapshot export (layer 3, used by tdr-qc).
+
+    TDR writes a snapshot export to ``gs://<bq_project>-snapshot-export-bucket/<jobId>/...`` and returns
+    signed https URLs on ``storage.googleapis.com``. The bucket is derived from the snapshot's own
+    BigQuery project (verified against a real export), so provenance is pinned **per-snapshot** -- tighter
+    than a fixed per-tier list. The trailing ``/`` anchors the prefix at the bucket boundary. Pass the
+    result to ``verify_pfb_handoff(allowed_prefixes=...)``.
+    """
+    return (f"https://storage.googleapis.com/{bq_project}-snapshot-export-bucket/",)
 
 
 class PfbHandoffError(SafetyError):
