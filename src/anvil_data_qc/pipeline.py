@@ -1,6 +1,6 @@
 """End-to-end QC pipeline orchestration.
 
-Implements the export/import flow from docs/export_import_flow.md:
+Implements the ADE/Azul export/import flow from docs/export_import_flow.md:
 
     TDR retrieveSnapshot -> BigQuery anvil_dataset.dataset_id -> Azul manifest (verbatim.pfb, poll)
     -> Rawls createWorkspace (authorizationDomain: []) -> Firecloud importJob -> poll to success
@@ -47,12 +47,12 @@ from .safety import (
     verify_pfb_handoff,
 )
 from .timing import stage_timer
-from .workspace import workspace_name
+from .workspace import ADE_NAME_INFIX, workspace_name
 
 logger = logging.getLogger(LOGGER_NAME)
 
 
-def run_qc(
+def run_ade_qc(
     snapshot_id: str,
     tier_name: Optional[str],
     config_path: Path,
@@ -62,7 +62,7 @@ def run_qc(
     allow_controlled_access: bool = False,
     azul_token_file: Optional[str] = None,
 ) -> dict:
-    """Run the export/import flow for one TDR snapshot. Returns the created workspace + log path.
+    """Run the ADE/Azul export/import flow for one TDR snapshot. Returns the created workspace + log path.
 
     ``dry_run`` stops after Azul returns the signed URL (steps 1-3) -- no workspace is created and no
     import is run -- to validate the export side with zero side effects.
@@ -184,7 +184,7 @@ def run_qc(
         }
 
     # 4. Rawls: create the destination workspace (empty auth domain; import applies it).
-    ws_name = workspace_name(tier.email, name)
+    ws_name = workspace_name(tier.email, name, infix=ADE_NAME_INFIX)
     rawls = RawlsClient(tier.url("rawls"), google_token)
     logger.info("Creating workspace %s/%s", tier.billing_project, ws_name)
     with stage_timer("workspace_create", durations):

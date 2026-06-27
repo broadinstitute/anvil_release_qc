@@ -139,10 +139,10 @@ HTTPS host.
 
 **Controlled-access ENABLED (2026-06 — Broad security team reviewed & approved the end-to-end flow, no
 restrictions, all AnVIL data):** the consent gate (layer 1) is now an **explicit, default-off opt-in**,
-`allow_controlled_access` (the `--allow-controlled-access` CLI flag / `qc.wdl` input; see
+`allow_controlled_access` (the `--allow-controlled-access` CLI flag / `ade_qc.wdl` input; see
 `safety.assert_consent_permitted`). Default stays fail-closed (open-access only); a controlled-access
 run must deliberately set the flag, which permits **any** consentCode and emits an audit `WARNING`.
-Layers 2-4 apply on every run regardless. For controlled data, `qc.wdl` also takes an `azul_token`
+Layers 2-4 apply on every run regardless. For controlled data, `ade_qc.wdl` also takes an `azul_token`
 (Azul requires a token for controlled access).
 **Status:** Mitigated; controlled-access live via the opt-in.
 **Revisit:** re-affirm on each release that the opt-in stays **default-off** and layers 2-4 are intact.

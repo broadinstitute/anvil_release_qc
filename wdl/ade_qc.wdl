@@ -1,7 +1,7 @@
 version 1.0
 
-# Release QC (full export/import + verify): export a TDR snapshot to a NEW Analysis Workspace and QC
-# it (AW vs snapshot + auth-domain). Runs `anvil-data-qc qc`.
+# Release QC via the ADE/Azul export (full export/import + verify): export a TDR snapshot to a NEW
+# Analysis Workspace and QC it (AW vs snapshot + auth-domain). Runs `anvil-data-qc ade-qc`.
 #
 # Open-access by default: the CLI consent gate blocks anything but consentCode == "NRES" (Azul queried
 # anonymously). For CONTROLLED-ACCESS (security-team approved, all AnVIL data): set
@@ -13,7 +13,7 @@ version 1.0
 # durations, and the created workspace name) is an output. Credentials = the ambient Terra runtime
 # service account; config supplied as a File input.
 
-workflow Qc {
+workflow AdeQc {
     input {
         File config
         String snapshot_id
@@ -25,7 +25,7 @@ workflow Qc {
         String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.2.1"
     }
 
-    call qc {
+    call ade_qc {
         input:
             config = config,
             snapshot_id = snapshot_id,
@@ -38,10 +38,10 @@ workflow Qc {
     }
 
     output {
-        File qc_report = qc.qc_report
-        File detailed_log = qc.detailed_log
-        Int qc_exit_code = qc.qc_exit_code
-        Boolean qc_passed = qc.qc_passed
+        File qc_report = ade_qc.qc_report
+        File detailed_log = ade_qc.detailed_log
+        Int qc_exit_code = ade_qc.qc_exit_code
+        Boolean qc_passed = ade_qc.qc_passed
     }
 
     parameter_meta {
@@ -56,7 +56,7 @@ workflow Qc {
     }
 }
 
-task qc {
+task ade_qc {
     input {
         File config
         String snapshot_id
@@ -78,7 +78,7 @@ task qc {
         # The pipeline logs to stderr; capture the exit code without failing the task. 0 = PASS,
         # 1 = QC failure, 2 = safety abort (e.g. a controlled-access snapshot without the opt-in).
         set +e
-        anvil-data-qc qc \
+        anvil-data-qc ade-qc \
             --config "~{config}" \
             --snapshot-id "~{snapshot_id}" \
             ~{"--tier " + tier} \

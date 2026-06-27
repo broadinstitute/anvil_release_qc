@@ -9,13 +9,13 @@ validated against dev**. The package `src/anvil_data_qc/` provides: `config` (YA
 resolution), `auth` (ADC per tier + identity guard), `azul_auth` (Azul token capture/validation),
 `logging_setup`, `clients/` (base + `tdr`, `azul`, `rawls`, `firecloud`, `sam`), `bigquery`,
 `workspace` (naming), `compare/` (the comparison seams: `sources`, `profile`, `engine`, `report`,
-`authdomain`, `qc`, and `ingest`), `pipeline` (the wired flow), and `cli` (Typer: `qc`, `compare`,
-`compare-ingest`, `azul-login`). The export/import pipeline runs TDR → BigQuery `dataset_id` → Azul
-manifest → Rawls `createWorkspace` → Firecloud `importJob` → **QC** (AW-vs-snapshot table comparison +
-auth-domain verification). Separately, **`compare-ingest`** covers the upstream `ADSW → TDR` step
+`authdomain`, `qc`, and `ingest`), `pipeline` (the wired flow), and `cli` (Typer: `ade-qc`, `compare`,
+`compare-ingest`, `azul-login`). The ADE/Azul export/import pipeline (`ade-qc`) runs TDR → BigQuery
+`dataset_id` → Azul manifest → Rawls `createWorkspace` → Firecloud `importJob` → **QC** (AW-vs-snapshot
+table comparison + auth-domain verification). Separately, **`compare-ingest`** covers the upstream `ADSW → TDR` step
 (submitter workspace vs TDR snapshot; table presence + exact row-count parity, driven from the
 submitter side) — the ingestion-completeness check. For deployment, a code-only **Docker image**
-(`Dockerfile`) plus three **womtool-validated WDL** wrappers (`wdl/{qc,compare,compare_ingest}.wdl`)
+(`Dockerfile`) plus three **womtool-validated WDL** wrappers (`wdl/{ade_qc,compare,compare_ingest}.wdl`)
 run the same CLI non-interactively in Terra — see [`wdl/README.md`](wdl/README.md).
 
 **Status of the implementation:**
@@ -24,7 +24,7 @@ run the same CLI non-interactively in Terra — see [`wdl/README.md`](wdl/README
   Azul (anonymous) → workspace → import → **`compare` reports QC PASS** (12 tables; row + column-count
   parity; empty TDR tables and `datarepo_row_ids` correctly excluded; auth-domain match).
 - ✅ **Validated end-to-end for a controlled-access snapshot** (2026-06-26, the
-  `ANVIL_ccdg_asc_ndd_daly_talkowski_cdcseed_asd_…` snapshot): the `qc` flow ran with
+  `ANVIL_ccdg_asc_ndd_daly_talkowski_cdcseed_asd_…` snapshot): the `ade-qc` flow ran with
   `--allow-controlled-access` + an Azul token and reported **QC PASS** (12 tables, full row parity, 0
   failing). This is the **first exercise of the auth-domain check against a real, non-empty domain**
   (snapshot vs workspace both `AUTH_anvil_ccdg_asc_ndd_daly_talkowski_cdcseed_asd` → match), which the
@@ -113,9 +113,9 @@ value — including empty/unknown — is blocked **fail-closed, before any PFB s
 controlled-access signed URL grants direct access to an NIH study's controlled data; mishandling it is a
 Federal DMI. **Controlled-access was reviewed and approved by the Broad security team (2026-06, no
 restrictions — all AnVIL data)** and is enabled by an **explicit, default-off opt-in**:
-`allow_controlled_access` (the `--allow-controlled-access` CLI flag / `qc.wdl` input; see
+`allow_controlled_access` (the `--allow-controlled-access` CLI flag / `ade_qc.wdl` input; see
 `safety.assert_consent_permitted`), which permits any `consentCode` and emits an audit `WARNING`.
-Controlled runs also require an Azul token (`qc.wdl` `azul_token` input). The other three safety layers
+Controlled runs also require an Azul token (`ade_qc.wdl` `azul_token` input). The other three safety layers
 (SignedUrl containment, hand-off verification, bearer-pinning) apply on every run. See
 [`src/anvil_data_qc/safety.py`](src/anvil_data_qc/safety.py) and risk **R8**. Keep the opt-in
 **default-off**, and do not weaken layers 2–4.
@@ -176,11 +176,12 @@ flow itself is specified in [`docs/export_import_flow.md`](docs/export_import_fl
 per-developer `config.yaml`.
 
 **Workspace creation:** one **retained** workspace **per run**. Name =
-`<user-local-part>_qc_anvil_ade_<sanitized full snapshot name>_YYYYMMDDHHMM` (run start time,
+`<user-local-part>_<infix>_<sanitized full snapshot name>_YYYYMMDDHHMM` (run start time,
 **minute-granular**), sanitizing any non-`[A-Za-z0-9_-]` run to a single `_`. The leading `qc`
-segment makes these workspaces easy to identify/group/delete (they accumulate — R4); `ade` (AnVIL
-Data Explorer, the public name) is used over the backend service name `azul`. The infix may evolve;
-`workspace._NAME_INFIX` is the single change point. Minute granularity
+segment makes these workspaces easy to identify/group/delete (they accumulate — R4); the infix also
+names the **export flow**: `qc_anvil_ade` (`ade-qc`; `ade` = AnVIL Data Explorer, the public name,
+preferred over the backend service name `azul`) or `qc_anvil_tdr` (`tdr-qc`). The infix may evolve and
+is a parameter of `workspace.workspace_name` (`ADE_NAME_INFIX` / `TDR_NAME_INFIX`). Minute granularity
 (not per-day) is for the **batch** use case (the primary one): a QC workflow that fails transiently
 can be **rerun without colliding** on an existing workspace — Terra workflows take minutes to start,
 so minute resolution suffices. **Fail fast** if the name already exists (now a rare same-minute edge).

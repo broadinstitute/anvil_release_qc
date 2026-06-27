@@ -2,7 +2,12 @@
 
 from datetime import datetime
 
-from anvil_data_qc.workspace import sanitize, workspace_name
+from anvil_data_qc.workspace import (
+    ADE_NAME_INFIX,
+    TDR_NAME_INFIX,
+    sanitize,
+    workspace_name,
+)
 
 
 def test_sanitize_collapses_disallowed_runs():
@@ -30,3 +35,21 @@ def test_workspace_name_minute_granular_avoids_collisions():
     a = workspace_name("u@x.org", snap, when=datetime(2026, 6, 10, 14, 31))
     b = workspace_name("u@x.org", snap, when=datetime(2026, 6, 10, 14, 32))
     assert a != b  # a one-minute-later rerun gets a distinct name
+
+
+def test_workspace_name_infix_default_is_ade():
+    # The infix defaults to the ADE/Azul flow (backward-compatible with the pre-rename behavior).
+    when = datetime(2026, 6, 10, 14, 31)
+    assert ADE_NAME_INFIX == "qc_anvil_ade"
+    name = workspace_name("u@x.org", "DS One", when=when)
+    assert f"_{ADE_NAME_INFIX}_" in name
+
+
+def test_workspace_name_infix_selects_flow():
+    # Each export flow selects its own infix so retained workspaces name their provenance.
+    when = datetime(2026, 6, 10, 14, 31)
+    ade = workspace_name("u@x.org", "DS One", when=when, infix=ADE_NAME_INFIX)
+    tdr = workspace_name("u@x.org", "DS One", when=when, infix=TDR_NAME_INFIX)
+    assert ade == "u_qc_anvil_ade_DS_One_202606101431"
+    assert tdr == "u_qc_anvil_tdr_DS_One_202606101431"
+    assert ade != tdr
