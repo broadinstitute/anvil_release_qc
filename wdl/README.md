@@ -99,11 +99,21 @@ Every workflow runs to completion and emits:
 |---|---|
 | `qc_passed` (Boolean) | the headline result — **sort/filter this column** in your data table to find failures |
 | `qc_exit_code` (Int) | `0` = PASS, `1` = QC failure, `2` = safety abort (e.g. a non-open-access snapshot blocked by the consent gate) |
-| `qc_report` (File) | the human-readable comparison report |
+| `qc_report` (File) | the human-readable comparison report (ends with the stage-timing summary line) |
 | `detailed_log` (File) | the full redacted request/response log |
+
+**`ade-qc` / `tdr-qc` only** — per-stage durations in **minutes** (the user-experienced delays; `0.0`
+if a stage didn't run, e.g. a dry run), as sortable data-table columns:
+
+| Output | Meaning |
+|---|---|
+| `azul_manifest_minutes` *(ade-qc)* / `tdr_export_minutes` *(tdr-qc)* (Float) | the export step (TDR/Azul) |
+| `workspace_create_minutes` (Float) | Rawls `createWorkspace` |
+| `import_minutes` (Float) | Firecloud `importJob` — usually the dominant stage, growing with dataset size |
 
 The task **always succeeds** so the report is always produced (a *failed* Cromwell task delocalizes no
 outputs). Identify failures by the `qc_passed` / `qc_exit_code` columns — no need to open each report.
+(QC comparison time is intentionally *not* reported — it's quick and not a user-experienced delay.)
 
 ## 5. Validate WDL changes locally
 
