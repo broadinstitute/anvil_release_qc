@@ -14,10 +14,15 @@ share the same QC** — the import tail (createWorkspace → importJob → poll)
 > **Driving principle — the TDR snapshot is the system of record.** As with the ADE flow, the process
 > is driven by the snapshot id and data read from the snapshot.
 
-> **Validation status (2026-06-27):** run end-to-end against the **prod** tier for the **open-access
-> 1000G** snapshot (`e8dacaea-…`): TDR export → manifest → `createWorkspace` → `importJob (tdrexport)`
-> → `Done`. (The dev attempt failed with a generic "Failed to fetch" — an under-resourced-dev-tier
-> flake, not a flow problem; prod succeeded first try.)
+> **Validation status (2026-06-27):**
+> - **Interactive UI (the capture):** run end-to-end against **prod** for the open-access 1000G snapshot
+>   (`e8dacaea-…`) — TDR export → manifest → `createWorkspace` → `importJob (tdrexport)` → `Done`. (The
+>   interactive *dev* attempt failed with a generic "Failed to fetch" — an under-resourced-dev-tier
+>   flake, not a flow problem; prod succeeded first try.)
+> - **`tdr-qc` automation:** run end-to-end against **dev** for the open-access 1000G snapshot
+>   (`790795c4-…`, `datarepo-dev-e53e74aa`) → **Overall QC PASS** (12 tables, 0 failing, full row parity;
+>   auth-domain `[]`==`[]`). Stage durations: export 41.8s, workspace 21.4s, import ~618s (~10 min — the
+>   automation's patient polling rode out the slow dev import that failed interactively).
 
 > **⚠️ Safety gate — open-access only (for now).** `tdr-qc` runs only on snapshots whose top-level
 > `consentCode` is exactly `NRES`. Controlled-access `tdr-qc` is **blocked entirely** — even with
