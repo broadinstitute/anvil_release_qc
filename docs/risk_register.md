@@ -144,17 +144,18 @@ restrictions, all AnVIL data):** the consent gate (layer 1) is now an **explicit
 run must deliberately set the flag, which permits **any** consentCode and emits an audit `WARNING`.
 Layers 2-4 apply on every run regardless. For controlled data, `ade_qc.wdl` also takes an `azul_token`
 (Azul requires a token for controlled access).
-**`tdr-qc` (TDR direct export) — open question before controlled-access (2026-06-27):** the new `tdr-qc`
-flow ([`tdr_export_flow.md`](tdr_export_flow.md)) reuses the same import + 4 safety layers, with the
-layer-3 provenance pinned per-snapshot to `storage.googleapis.com/<bq_project>-snapshot-export-bucket/`.
-But the Terra import option **`tdrSyncPermissions`** was `false` in the open-access capture, whereas TDR
-snapshot permissions are *generally* synced (`true`); the `false` is likely because the dataset was
-open-access. Mirroring `false` onto **controlled** data could leave the workspace **under-protected**.
-So `tdr-qc` is **open-access only** (`safety.assert_tdr_qc_permitted` blocks controlled-access entirely,
-even with the opt-in) until the correct controlled-access value (likely `true`) — and whether `tdrexport`
-applies the auth domain at all — is confirmed via a controlled-snapshot test. The QC auth-domain check
-is a post-hoc backstop (would flag an under-protected workspace) but the cause must be fixed first.
-**Status:** Mitigated; ade-qc controlled-access live via the opt-in. `tdr-qc` controlled-access blocked
-pending the `tdrSyncPermissions` confirmation.
-**Revisit:** re-affirm on each release that the opt-in stays **default-off** and layers 2-4 are intact;
-and **before enabling controlled-access `tdr-qc`** (resolve `tdrSyncPermissions`).
+**`tdr-qc` (TDR direct export) — controlled-access ENABLED (2026-06-27):** the `tdr-qc` flow
+([`tdr_export_flow.md`](tdr_export_flow.md)) reuses the same import + 4 safety layers, with the layer-3
+provenance pinned per-snapshot to `storage.googleapis.com/<bq_project>-snapshot-export-bucket/`. The
+importJob sets **`tdrSyncPermissions: false`** for all data. This was briefly an open question (could
+`false` under-protect a controlled workspace?), **resolved via a prod controlled-access capture** (the
+`ANVIL_dGTEx_GRU_v1` GRU snapshot): the controlled flow also used `false`; the import applies the
+snapshot's auth domain to the workspace **independently of `tdrSyncPermissions`** (the produced GRU
+workspace carried `AUTH_AnVIL_dGTEx_GRU_v1`); and `false` is **least-privilege** (a new workspace is
+owner-only, sharing stays gated by the auth domain, whereas `true` would copy the snapshot's reader
+policies — granting access we do not intend). So `tdr-qc` supports controlled-access via the same
+default-off `--allow-controlled-access` opt-in as ade-qc (`safety.assert_consent_permitted`); no Azul
+token — the operator's own Terra access must cover the controlled data (TDR `/export` 403s otherwise).
+The QC auth-domain check is the post-hoc backstop (would flag an under-protected workspace).
+**Status:** Mitigated; ade-qc AND tdr-qc controlled-access live via the opt-in.
+**Revisit:** re-affirm on each release that the opt-in stays **default-off** and layers 2-4 are intact.

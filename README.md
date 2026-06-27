@@ -55,7 +55,7 @@ The operations, one per concern (two routes for the release export):
 |---|---|---|---|
 | **`compare-ingest`** | every submitter table was ingested into TDR with the same row count | ADSW → TDR | Operations (ingestion) |
 | **`ade-qc`** | a snapshot exports/imports into a new Analysis Workspace via the **ADE/Azul** export, then that workspace matches the snapshot (tables, rows, columns, auth domain) | TDR → ADE → AW | Operations / data QA |
-| **`tdr-qc`** | the same end result via a **direct TDR export** (no ADE/Azul) — for very large datasets that fail ADE export; open-access only for now | TDR → AW | Operations / data QA |
+| **`tdr-qc`** | the same end result via a **direct TDR export** (no ADE/Azul) — for very large datasets that fail ADE export | TDR → AW | Operations / data QA |
 | **`compare`** | an existing Analysis Workspace still matches its snapshot (no re-import) | AW ↔ TDR | Data QA |
 
 All runs are **open-access only** by default — a fail-closed safety gate blocks anything else (see
@@ -119,11 +119,12 @@ anvil-data-qc ade-qc --snapshot-id <tdr-snapshot-id> --tier prod --catalog anvil
 #   add --dry-run to validate the export side only (no workspace created, no import run)
 ```
 
-**Same QC via a direct TDR export** (no ADE/Azul; for very large datasets that fail ADE export; open-access only for now):
+**Same QC via a direct TDR export** (no ADE/Azul; for very large datasets that fail ADE export):
 
 ```bash
 anvil-data-qc tdr-qc --snapshot-id <tdr-snapshot-id> --tier prod
 #   uses Terra credentials throughout — no Azul token; add --dry-run for the export side only
+#   controlled-access: add --allow-controlled-access (no token; your Terra account must have access)
 ```
 
 **Re-check an existing Analysis Workspace against its snapshot:**

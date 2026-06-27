@@ -7,10 +7,8 @@ from anvil_data_qc.safety import (
     ControlledAccessNotApprovedError,
     SignedUrl,
     SignedUrlProvenanceError,
-    TdrControlledAccessNotYetEnabledError,
     assert_consent_permitted,
     assert_open_access,
-    assert_tdr_qc_permitted,
     is_open_access,
     tdr_export_allowed_prefixes,
     verify_pfb_handoff,
@@ -62,28 +60,10 @@ def test_consent_gate_allows_any_code_when_opt_in_on(code):
     assert_consent_permitted("snap-1", code, allow_controlled_access=True)
 
 
-# --- assert_tdr_qc_permitted: open-access ONLY for now (controlled blocked even with the opt-in) ---
-
-
-def test_tdr_qc_gate_open_access_passes():
-    # NRES proceeds regardless of the opt-in.
-    assert_tdr_qc_permitted("snap-1", "NRES", allow_controlled_access=False)
-    assert_tdr_qc_permitted("snap-1", "NRES", allow_controlled_access=True)
-
-
-@pytest.mark.parametrize("code", ["", None, "GRU", "phs000123"])
-def test_tdr_qc_gate_blocks_controlled_opt_in_off(code):
-    # Default fail-closed, like ade-qc.
-    with pytest.raises(ControlledAccessNotApprovedError):
-        assert_tdr_qc_permitted("snap-1", code, allow_controlled_access=False)
-
-
-@pytest.mark.parametrize("code", ["", None, "GRU", "phs000123"])
-def test_tdr_qc_gate_blocks_controlled_even_with_opt_in(code):
-    # Unlike ade-qc, tdr-qc blocks controlled-access ENTIRELY for now -- even with the opt-in --
-    # pending the tdrSyncPermissions confirmation.
-    with pytest.raises(TdrControlledAccessNotYetEnabledError):
-        assert_tdr_qc_permitted("snap-1", code, allow_controlled_access=True)
+# tdr-qc uses the same consent gate as ade-qc (assert_consent_permitted, covered above): open-access by
+# default, any consentCode when allow_controlled_access is set. (tdrSyncPermissions=false was confirmed
+# correct + safe for controlled data on 2026-06-27 -- the auth domain is applied independently and the
+# QC auth-domain check is the backstop; see docs/tdr_export_flow.md.)
 
 
 # --- TDR export provenance (layer 3): per-snapshot export bucket on GCS ---

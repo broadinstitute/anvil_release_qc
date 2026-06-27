@@ -69,10 +69,11 @@ Each has a matching `*.inputs.example.json`. Fill in `config`, the workspace/sna
 - **`ade-qc` is open-access by default**: Azul is queried anonymously (the consent gate enforces
   `consentCode == "NRES"`), so **no Azul token is needed**. `compare` / `compare-ingest` never touch Azul.
 - **`tdr-qc` never touches Azul** — it exports directly from TDR using the runtime Terra credentials, so
-  it needs **no Azul token at all** (no `azul_token` input). It is **open-access only for now**:
-  controlled-access `tdr-qc` is blocked pending confirmation of the import's permission-sync behavior
-  (see [`docs/tdr_export_flow.md`](../docs/tdr_export_flow.md)); `allow_controlled_access` is accepted
-  for parity but still blocks. Simpler inputs than `ade_qc.wdl` (no `catalog`, no `azul_token`).
+  it needs **no Azul token at all** (no `azul_token` input), for open- *and* controlled-access. Controlled
+  data uses the same default-off `allow_controlled_access` opt-in as `ade_qc.wdl` (the runtime identity's
+  own Terra access must cover the controlled data — TDR `/export` 403s otherwise; the import applies the
+  snapshot's auth domain, verified by the QC check — see [`docs/tdr_export_flow.md`](../docs/tdr_export_flow.md)).
+  Simpler inputs than `ade_qc.wdl` (no `catalog`, no `azul_token`).
 
 ### Controlled-access (`ade-qc` only)
 

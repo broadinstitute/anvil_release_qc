@@ -15,9 +15,10 @@ BigQuery `dataset_id` → Azul manifest → Rawls `createWorkspace` → Fireclou
 (AW-vs-snapshot table comparison + auth-domain verification). A **second route, `tdr-qc`**
 ([`docs/tdr_export_flow.md`](docs/tdr_export_flow.md)), reaches the same QC via a **direct TDR snapshot
 export** (no ADE/Azul; Terra/ADC tokens throughout) → signed `manifest.json` → the **same** Rawls/
-Firecloud import tail (`importJob` `filetype: tdrexport`) → the **same** QC — for very large datasets
-that fail ADE export (open-access only for now; controlled-access blocked pending a `tdrSyncPermissions`
-confirmation). The two flows share `pipeline._create_import_and_qc` (the import+QC tail). Separately,
+Firecloud import tail (`importJob` `filetype: tdrexport`, `tdrSyncPermissions: false`) → the **same** QC
+— for very large datasets that fail ADE export. Open-access by default; **controlled-access via the same
+default-off `--allow-controlled-access` opt-in as ade-qc** (no Azul token — the operator's Terra creds
+must grant the controlled access). The two flows share `pipeline._create_import_and_qc` (the import+QC tail). Separately,
 **`compare-ingest`** covers the upstream `ADSW → TDR` step
 (submitter workspace vs TDR snapshot; table presence + exact row-count parity, driven from the
 submitter side) — the ingestion-completeness check. For deployment, a code-only **Docker image**

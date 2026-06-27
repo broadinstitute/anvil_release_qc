@@ -121,15 +121,15 @@ def tdr_qc(
     allow_controlled_access: bool = typer.Option(
         False,
         "--allow-controlled-access",
-        help="Opt in to controlled-access snapshots. NOTE: controlled-access tdr-qc is not yet enabled "
-        "(pending permission-sync confirmation); open-access only for now.",
+        help="Opt in to controlled-access snapshots (any consentCode). Default off = open-access only.",
     ),
 ) -> None:
     """Run the TDR direct-export + QC flow for one TDR snapshot.
 
     Exports the snapshot directly from TDR (no ADE/Azul, no Azul token), imports it into a new Analysis
     Workspace, and verifies it (AW vs snapshot + auth-domain) -- for very large datasets that fail to
-    export via ADE/Azul. Open-access only for now.
+    export via ADE/Azul. Open-access by default; controlled-access via --allow-controlled-access (no
+    Azul token needed -- your own Terra credentials must grant access to the controlled data).
     """
     try:
         result = run_tdr_qc(
