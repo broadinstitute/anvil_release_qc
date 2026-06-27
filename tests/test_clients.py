@@ -190,10 +190,56 @@ def test_tdr_wait_for_export_job_succeeds(monkeypatch):
 
 def test_tdr_wait_for_export_job_raises_on_failure(monkeypatch):
     client = TdrClient("https://tdr.example", lambda: "token")
-    monkeypatch.setattr(client, "get_job", lambda jid: {"job_status": "failed"})
+    monkeypatch.setattr(client, "get_job", lambda jid: {"job_status": "failed", "status_code": 500})
     monkeypatch.setattr("anvil_data_qc.clients.tdr.time.sleep", lambda _s: None)
-    with pytest.raises(RuntimeError):
+    with pytest.raises(RuntimeError) as excinfo:
         client.wait_for_export_job("job-1", poll_interval=0)
+    # The error names the job + status but does NOT dump the whole payload (redaction discipline).
+    assert "job-1" in str(excinfo.value) and "failed" in str(excinfo.value)
+
+
+def test_tdr_wait_for_export_job_polls_through_unknown_status(monkeypatch):
+    # An unknown OR missing job_status is treated as still-in-progress (keep polling), not terminal.
+    client = TdrClient("https://tdr.example", lambda: "token")
+    statuses = iter(
+        [
+            {"job_status": "queued"},  # unknown (not running/succeeded/failed)
+            {},  # missing job_status entirely
+            {"job_status": "running"},
+            {"job_status": "succeeded"},
+        ]
+    )
+    monkeypatch.setattr(client, "get_job", lambda jid: next(statuses))
+    monkeypatch.setattr("anvil_data_qc.clients.tdr.time.sleep", lambda _s: None)
+    job = client.wait_for_export_job("job-1", poll_interval=0)
+    assert job["job_status"] == "succeeded"  # polled through queued / missing / running
+
+
+def test_tdr_wait_for_export_job_times_out(monkeypatch):
+    # A job that never reaches a terminal state raises TimeoutError once the deadline passes.
+    client = TdrClient("https://tdr.example", lambda: "token")
+    monkeypatch.setattr(client, "get_job", lambda jid: {"job_status": "running"})
+    monkeypatch.setattr("anvil_data_qc.clients.tdr.time.sleep", lambda _s: None)
+    # deadline = monotonic() + max_wait = 100.0; the first in-loop check (200.0) is past it.
+    ticks = iter([100.0, 200.0])
+    monkeypatch.setattr("anvil_data_qc.clients.tdr.time.monotonic", lambda: next(ticks))
+    with pytest.raises(TimeoutError):
+        client.wait_for_export_job("job-1", poll_interval=0, max_wait=0)
+
+
+def test_tdr_get_job_and_result_build_urls(monkeypatch):
+    client = TdrClient("https://tdr.example", lambda: "token")
+    captured = {}
+
+    def fake_request(method, path, **kwargs):
+        captured["method"], captured["path"] = method, path
+        return _Resp({"job_status": "running"})
+
+    monkeypatch.setattr(client, "request", fake_request)
+    client.get_job("job-xyz")
+    assert captured == {"method": "GET", "path": "/api/repository/v1/jobs/job-xyz"}
+    client.get_job_result("job-xyz")
+    assert captured["path"] == "/api/repository/v1/jobs/job-xyz/result"
 
 
 def test_export_job_id_missing_raises():

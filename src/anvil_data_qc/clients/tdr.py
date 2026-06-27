@@ -77,12 +77,13 @@ class TdrClient(BaseClient):
         return self.request("GET", f"/api/repository/v1/jobs/{job_id}/result").json()
 
     def wait_for_export_job(
-        self, job_id: str, poll_interval: float = 10.0, max_wait: float = 3600.0
+        self, job_id: str, poll_interval: float = 10.0, max_wait: float = 7200.0
     ) -> dict:
         """Poll a TDR export job until it succeeds; raise on failure or timeout.
 
-        Large snapshots (the reason tdr-qc exists) can take a while to export, hence the generous
-        ``max_wait``. Any non-terminal status keeps polling.
+        Large snapshots (the reason tdr-qc exists) can take a while to export, so ``max_wait`` matches
+        the import budget (2h). Any non-terminal status -- including an unknown/missing one -- keeps
+        polling (treated as still-in-progress) until a terminal state or the deadline.
         """
         deadline = time.monotonic() + max_wait
         while True:
@@ -92,7 +93,12 @@ class TdrClient(BaseClient):
             if status == JOB_SUCCESS:
                 return job
             if status == JOB_FAILURE:
-                raise RuntimeError(f"TDR export job {job_id} failed: {job}")
+                # Surface job_id + status only (not the whole payload) -- the status payload has no
+                # signed URLs, but keep the redaction discipline of the rest of the flow.
+                raise RuntimeError(
+                    f"TDR export job {job_id} failed (job_status={status!r}, "
+                    f"status_code={job.get('status_code')!r})."
+                )
             if time.monotonic() > deadline:
                 raise TimeoutError(f"TDR export job {job_id} did not finish within {max_wait}s.")
             time.sleep(poll_interval)
