@@ -21,7 +21,7 @@ workflow TdrQc {
         String? tier
         Boolean dry_run = false
         Boolean allow_controlled_access = false
-        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.2.1"
+        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.3.0"
     }
 
     call tdr_qc {
