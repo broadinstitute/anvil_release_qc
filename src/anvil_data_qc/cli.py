@@ -25,8 +25,10 @@ from .azul_auth import (
     validate_azul_token,
     write_azul_token,
 )
+from .bigquery import snapshot_data_volume
 from .clients.tdr import TdrClient, snapshot_bigquery_access
 from .compare.ingest import run_ingest_comparison
+from .compare.profile import TDR_SYSTEM_TABLES
 from .compare.qc import run_qc_comparison
 from .config import load_config, resolve_tier
 from .pipeline import run_ade_qc, run_tdr_qc
@@ -195,6 +197,9 @@ def compare(
     try:
         snapshot = TdrClient(resolved.url("tdr"), google_token).retrieve_snapshot(snapshot_id)
         bq_project, bq_dataset = snapshot_bigquery_access(snapshot)
+        volume = snapshot_data_volume(
+            creds, bq_project, bq_dataset, resolved.billing_project, ignore_tables=TDR_SYSTEM_TABLES
+        )
         result = run_qc_comparison(
             creds=creds,
             tier=resolved,
@@ -209,7 +214,10 @@ def compare(
         # Safety gate (e.g. a bearer-token destination violation; see safety.py). Clean message.
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from exc
+    # Report to stdout (captured as qc_report.txt by the WDL), with the data-volume line at the end so
+    # it rides with the report and the WDL can parse it into the volume outputs.
     typer.echo(result.render())
+    typer.echo(volume.summary_line())
     raise typer.Exit(0 if result.passed else 1)
 
 

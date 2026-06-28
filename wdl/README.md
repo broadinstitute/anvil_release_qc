@@ -102,8 +102,23 @@ Every workflow runs to completion and emits:
 | `qc_report` (File) | the human-readable comparison report (ends with the stage-timing summary line) |
 | `detailed_log` (File) | the full redacted request/response log |
 
+**`ade-qc` / `tdr-qc`, `compare` — snapshot data-volume counts** (sortable data-table columns; an instrument
+for the Terra Data Table capacity challenge — see [`docs/comparison.md`](../docs/comparison.md)):
+
+| Output | Meaning |
+|---|---|
+| `total_table_count` (Int) | non-system, non-empty tables (matches "N tables compared") |
+| `total_row_count` (Int) | Σ rows |
+| `total_value_count` (Int) | Σ (rows × schema columns) — a modest over-approximation of imported volume |
+
+For `ade-qc`/`tdr-qc` these are computed **before** the import, so they're populated **even on a failed
+row** (`qc_passed=false`) — telling you how big the snapshot that wouldn't import was. **Not** emitted by
+`compare-ingest` (an intentional partial comparison). The report shows them comma-separated for reading;
+the outputs are the raw integers.
+
 **`ade-qc` / `tdr-qc` only** — per-stage durations in **minutes** (the user-experienced delays; `0.0`
-if a stage didn't run, e.g. a dry run), as sortable data-table columns:
+if a stage didn't run, e.g. a dry run; **partial durations are surfaced even on a failed/timed-out
+import**, e.g. `import_minutes≈120` when the 2 h wait elapses), as sortable data-table columns:
 
 | Output | Meaning |
 |---|---|

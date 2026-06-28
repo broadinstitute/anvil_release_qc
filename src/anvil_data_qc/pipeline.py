@@ -19,7 +19,7 @@ real (retained) workspace.
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable, Optional
 from urllib.parse import urlsplit
@@ -34,7 +34,7 @@ from .azul_auth import (
     read_azul_token,
     validate_azul_token,
 )
-from .bigquery import resolve_dataset_id
+from .bigquery import resolve_dataset_id, snapshot_data_volume
 from .clients.azul import AzulClient
 from .clients.firecloud import FirecloudClient, import_job_id
 from .clients.rawls import RawlsClient
@@ -46,6 +46,7 @@ from .clients.tdr import (
     snapshot_consent_code,
     snapshot_name,
 )
+from .compare.profile import TDR_SYSTEM_TABLES
 from .compare.qc import run_qc_comparison
 from .config import SERVICE_URLS, ResolvedTier, load_config, resolve_tier
 from .logging_setup import LOGGER_NAME, setup_logging, write_header
@@ -175,60 +176,64 @@ def _create_import_and_qc(
     ws_name = workspace_name(tier.email, name, infix=infix)
     rawls = RawlsClient(tier.url("rawls"), google_token)
     logger.info("Creating workspace %s/%s", tier.billing_project, ws_name)
-    with stage_timer("workspace_create", durations):
-        rawls.create_workspace(tier.billing_project, ws_name, description=description)
+    try:
+        with stage_timer("workspace_create", durations):
+            rawls.create_workspace(tier.billing_project, ws_name, description=description)
 
-    # Firecloud: import and wait for the job to succeed. Dev Terra can be slow (createWorkspace alone
-    # took ~20s); give the import submit/polls headroom.
-    firecloud = FirecloudClient(tier.url("firecloud"), google_token, timeout=180)
-    # Verify the signed URL is delivered only to this tier's import service, and is from the expected
-    # source, before handing it over -- defense against a controlled signed URL reaching a wrong/dev
-    # destination (a Federal DMI). See safety.verify_pfb_handoff.
-    verify_pfb_handoff(
-        signed_url,
-        tier_name=tier.name,
-        expected_firecloud_host=urlsplit(SERVICE_URLS[tier.name]["firecloud"]).netloc,
-        destination_host=urlsplit(firecloud.base_url).netloc,
-        allowed_prefixes=allowed_prefixes,
-    )
-    with stage_timer("import", durations):
-        submit = firecloud.submit_import_job(
-            tier.billing_project, ws_name, signed_url, filetype=filetype, options=import_options
+        # Firecloud: import and wait for the job to succeed. Dev Terra can be slow (createWorkspace
+        # alone took ~20s); give the import submit/polls headroom.
+        firecloud = FirecloudClient(tier.url("firecloud"), google_token, timeout=180)
+        # Verify the signed URL is delivered only to this tier's import service, and is from the
+        # expected source, before handing it over -- defense against a controlled signed URL reaching a
+        # wrong/dev destination (a Federal DMI). See safety.verify_pfb_handoff.
+        verify_pfb_handoff(
+            signed_url,
+            tier_name=tier.name,
+            expected_firecloud_host=urlsplit(SERVICE_URLS[tier.name]["firecloud"]).netloc,
+            destination_host=urlsplit(firecloud.base_url).netloc,
+            allowed_prefixes=allowed_prefixes,
         )
-        job_id = import_job_id(submit)
-        logger.info("Import job submitted: %s", job_id)
-        firecloud.wait_for_import(tier.billing_project, ws_name, job_id)
+        with stage_timer("import", durations):
+            submit = firecloud.submit_import_job(
+                tier.billing_project, ws_name, signed_url, filetype=filetype, options=import_options
+            )
+            job_id = import_job_id(submit)
+            logger.info("Import job submitted: %s", job_id)
+            firecloud.wait_for_import(tier.billing_project, ws_name, job_id)
 
-    logger.info("Export/import complete. Workspace: %s/%s", tier.billing_project, ws_name)
+        logger.info("Export/import complete. Workspace: %s/%s", tier.billing_project, ws_name)
 
-    # QC: compare the AW data tables to the TDR snapshot (T1-T2) and verify the auth domain. (QC is
-    # not a timed stage -- it is quick and not a user-experienced delay, like the `compare` command.)
-    qc = run_qc_comparison(
-        creds=setup.creds,
-        tier=tier,
-        snapshot_id=snapshot_id,
-        bq_project=bq_project,
-        bq_dataset=bq_dataset,
-        namespace=tier.billing_project,
-        workspace_name=ws_name,
-        token_provider=google_token,
-    )
-    logger.info("QC report:\n%s", qc.render())
-    if not qc.passed:
-        logger.warning(
-            "QC FAILED for %s/%s -- see the report above.", tier.billing_project, ws_name
+        # QC: compare the AW data tables to the TDR snapshot (T1-T2) and verify the auth domain. (QC is
+        # not a timed stage -- quick, not a user-experienced delay, like the `compare` command.)
+        qc = run_qc_comparison(
+            creds=setup.creds,
+            tier=tier,
+            snapshot_id=snapshot_id,
+            bq_project=bq_project,
+            bq_dataset=bq_dataset,
+            namespace=tier.billing_project,
+            workspace_name=ws_name,
+            token_provider=google_token,
         )
-    # End-of-run summary of the user-experienced stage delays (minutes); appended to the QC report and
-    # parsed into the per-stage WDL duration outputs.
-    log_stage_summary(durations)
-    return {
-        "workspace_namespace": tier.billing_project,
-        "workspace_name": ws_name,
-        "snapshot_name": name,
-        "qc_passed": qc.passed,
-        "durations": durations,
-        "log_file": str(setup.log_file),
-    }
+        logger.info("QC report:\n%s", qc.render())
+        if not qc.passed:
+            logger.warning(
+                "QC FAILED for %s/%s -- see the report above.", tier.billing_project, ws_name
+            )
+        return {
+            "workspace_namespace": tier.billing_project,
+            "workspace_name": ws_name,
+            "snapshot_name": name,
+            "qc_passed": qc.passed,
+            "durations": durations,
+            "log_file": str(setup.log_file),
+        }
+    finally:
+        # End-of-run summary of the user-experienced stage delays (minutes), appended to the QC report
+        # and parsed into the WDL duration outputs. In a `finally` so it surfaces even when the import
+        # fails/times out -- the partial durations (e.g. the ~2h import-until-timeout) are exactly what
+        # an operator needs to triage a failure.
+        log_stage_summary(durations)
 
 
 def run_ade_qc(
@@ -329,6 +334,12 @@ def run_ade_qc(
     bq_project, bq_dataset = snapshot_bigquery_access(snapshot)
     logger.info("Snapshot '%s' -> BigQuery %s.%s", name, bq_project, bq_dataset)
 
+    # Data-volume metrics from the snapshot (logged now, before the export/import, so they are
+    # available even if a later step fails). Excludes system + empty tables; see snapshot_data_volume.
+    volume = snapshot_data_volume(
+        setup.creds, bq_project, bq_dataset, tier.billing_project, ignore_tables=TDR_SYSTEM_TABLES
+    )
+
     # 2. BigQuery: resolve the Azul dataset_id from the snapshot (system of record).
     dataset_id = resolve_dataset_id(setup.creds, bq_project, bq_dataset, tier.billing_project)
 
@@ -354,22 +365,26 @@ def run_ade_qc(
             "signed_url_location": location,
             "durations": durations,
             "log_file": str(setup.log_file),
+            **asdict(volume),
         }
 
-    return _create_import_and_qc(
-        setup=setup,
-        snapshot_id=snapshot_id,
-        name=name,
-        bq_project=bq_project,
-        bq_dataset=bq_dataset,
-        signed_url=signed_url,
-        filetype="pfb",
-        import_options=None,
-        allowed_prefixes=SIGNED_URL_ALLOWED_PREFIXES.get(tier.name, ()),
-        infix=ADE_NAME_INFIX,
-        description=f"AnVIL Data Release QC export of {name}",
-        durations=durations,
-    )
+    return {
+        **_create_import_and_qc(
+            setup=setup,
+            snapshot_id=snapshot_id,
+            name=name,
+            bq_project=bq_project,
+            bq_dataset=bq_dataset,
+            signed_url=signed_url,
+            filetype="pfb",
+            import_options=None,
+            allowed_prefixes=SIGNED_URL_ALLOWED_PREFIXES.get(tier.name, ()),
+            infix=ADE_NAME_INFIX,
+            description=f"AnVIL Data Release QC export of {name}",
+            durations=durations,
+        ),
+        **asdict(volume),
+    }
 
 
 def run_tdr_qc(
@@ -441,6 +456,12 @@ def run_tdr_qc(
     bq_project, bq_dataset = snapshot_bigquery_access(snapshot)
     logger.info("Snapshot '%s' -> BigQuery %s.%s", name, bq_project, bq_dataset)
 
+    # Data-volume metrics from the snapshot (logged now, before the export/import, so they are
+    # available even if a later step fails). Excludes system + empty tables; see snapshot_data_volume.
+    volume = snapshot_data_volume(
+        setup.creds, bq_project, bq_dataset, tier.billing_project, ignore_tables=TDR_SYSTEM_TABLES
+    )
+
     # 2-3. TDR: export the snapshot (async) and obtain the signed manifest.json URL.
     durations: dict[str, float] = {}
     with stage_timer("tdr_export", durations):
@@ -465,19 +486,23 @@ def run_tdr_qc(
             "signed_url_location": location,
             "durations": durations,
             "log_file": str(setup.log_file),
+            **asdict(volume),
         }
 
-    return _create_import_and_qc(
-        setup=setup,
-        snapshot_id=snapshot_id,
-        name=name,
-        bq_project=bq_project,
-        bq_dataset=bq_dataset,
-        signed_url=signed_url,
-        filetype=TDR_IMPORT_FILETYPE,
-        import_options={"tdrSyncPermissions": TDR_SYNC_PERMISSIONS},
-        allowed_prefixes=tdr_export_allowed_prefixes(bq_project),
-        infix=TDR_NAME_INFIX,
-        description=f"AnVIL Data Release TDR-export QC of {name}",
-        durations=durations,
-    )
+    return {
+        **_create_import_and_qc(
+            setup=setup,
+            snapshot_id=snapshot_id,
+            name=name,
+            bq_project=bq_project,
+            bq_dataset=bq_dataset,
+            signed_url=signed_url,
+            filetype=TDR_IMPORT_FILETYPE,
+            import_options={"tdrSyncPermissions": TDR_SYNC_PERMISSIONS},
+            allowed_prefixes=tdr_export_allowed_prefixes(bq_project),
+            infix=TDR_NAME_INFIX,
+            description=f"AnVIL Data Release TDR-export QC of {name}",
+            durations=durations,
+        ),
+        **asdict(volume),
+    }

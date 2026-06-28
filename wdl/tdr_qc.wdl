@@ -21,7 +21,7 @@ workflow TdrQc {
         String? tier
         Boolean dry_run = false
         Boolean allow_controlled_access = false
-        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.3.0"
+        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.3.1"
     }
 
     call tdr_qc {
@@ -42,6 +42,9 @@ workflow TdrQc {
         Float tdr_export_minutes = tdr_qc.tdr_export_minutes
         Float workspace_create_minutes = tdr_qc.workspace_create_minutes
         Float import_minutes = tdr_qc.import_minutes
+        Int total_table_count = tdr_qc.total_table_count
+        Int total_row_count = tdr_qc.total_row_count
+        Int total_value_count = tdr_qc.total_value_count
     }
 
     parameter_meta {
@@ -97,6 +100,16 @@ task tdr_qc {
             [ -s "${stage}_minutes.txt" ] || echo 0 > "${stage}_minutes.txt"
         done
 
+        # Data-volume metrics, logged before the export so they're present even if the import failed.
+        # Append the line to the report and parse the counts (commas stripped) into Int outputs;
+        # default 0 if absent (e.g. an auth/consent failure before BigQuery).
+        VOLUME="$(grep -F 'Data volume (TDR snapshot)' detailed_log.txt | tail -1 || true)"
+        if [ -n "$VOLUME" ]; then echo "$VOLUME" >> qc_report.txt; fi
+        for metric in total_table_count total_row_count total_value_count; do
+            echo "$VOLUME" | grep -oE "${metric}=[0-9,]+" | head -1 | cut -d= -f2 | tr -d ',' > "${metric}.txt" || true
+            [ -s "${metric}.txt" ] || echo 0 > "${metric}.txt"
+        done
+
         cat detailed_log.txt  # surface the full log in the Cromwell task stdout
     >>>
 
@@ -116,5 +129,9 @@ task tdr_qc {
         Float tdr_export_minutes = read_float("tdr_export_minutes.txt")
         Float workspace_create_minutes = read_float("workspace_create_minutes.txt")
         Float import_minutes = read_float("import_minutes.txt")
+        # Snapshot data volume (non-system, non-empty tables); present even if the import failed.
+        Int total_table_count = read_int("total_table_count.txt")
+        Int total_row_count = read_int("total_row_count.txt")
+        Int total_value_count = read_int("total_value_count.txt")
     }
 }

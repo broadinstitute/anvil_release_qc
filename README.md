@@ -212,7 +212,9 @@ runs also need an Azul token (the `ade_qc.wdl` `azul_token` input) — see [`wdl
 The same code runs non-interactively in Terra as a **code-only Docker image** driven by four **WDL**
 workflows (`ade-qc`, `tdr-qc`, `compare`, `compare-ingest`). Credentials come from the workspace's runtime service
 account; the per-tier config is a workflow input; each run emits a **`qc_passed`** output you can
-sort/filter to triage failures across many datasets at once.
+sort/filter to triage failures across many datasets at once — plus per-stage **durations** and snapshot
+**data-volume counts** (tables / rows / values) as columns, populated even on a failed/timed-out run, to
+help characterize Terra Data Table capacity.
 
 → Build → push → run, and the full runtime model: **[`wdl/README.md`](wdl/README.md)**.
 
