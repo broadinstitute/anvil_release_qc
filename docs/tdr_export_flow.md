@@ -94,6 +94,12 @@ where it also validates the Azul token.)
 - **Tabular comparison** (`compare/`): AW data tables (Rawls entities) vs the TDR snapshot tables
   (BigQuery), T1–T2 (table parity, row counts, column-count sanity), with the usual normalizations.
 
+**Data-volume metrics** (`total_table_count` / `total_row_count` / `total_value_count`): computed from
+the snapshot's BigQuery structure **before the export** (so they're reported — in the log, the QC
+report, and as workflow outputs — **even if the import times out or errors**) and logged at the start as
+an early read on volume. Definitions, exclusions, and the schema-column over-approximation are in
+[`comparison.md`](comparison.md#data-volume-metrics-table--row--value-counts).
+
 ## `tdrSyncPermissions: false` — resolved correct + safe for all data (2026-06-27)
 
 The importJob sets `options.tdrSyncPermissions = false` for **every** run, including controlled-access.

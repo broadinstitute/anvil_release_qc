@@ -15,7 +15,7 @@ workflow Compare {
         String workspace_name
         String snapshot_id
         String? tier
-        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.3.0"
+        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.3.1"
     }
 
     call compare {
@@ -33,6 +33,9 @@ workflow Compare {
         File detailed_log = compare.detailed_log
         Int qc_exit_code = compare.qc_exit_code
         Boolean qc_passed = compare.qc_passed
+        Int total_table_count = compare.total_table_count
+        Int total_row_count = compare.total_row_count
+        Int total_value_count = compare.total_value_count
     }
 
     parameter_meta {
@@ -74,6 +77,14 @@ task compare {
         echo "$?" > qc_exit_code.txt
         set -e
 
+        # Data-volume counts: the `compare` command echoes the line into the report (stdout). Parse the
+        # counts (commas stripped) into Int outputs; default 0 if absent.
+        VOLUME="$(grep -F 'Data volume (TDR snapshot)' qc_report.txt | tail -1 || true)"
+        for metric in total_table_count total_row_count total_value_count; do
+            echo "$VOLUME" | grep -oE "${metric}=[0-9,]+" | head -1 | cut -d= -f2 | tr -d ',' > "${metric}.txt" || true
+            [ -s "${metric}.txt" ] || echo 0 > "${metric}.txt"
+        done
+
         cat qc_report.txt  # also surface the report in the Cromwell task stdout
     >>>
 
@@ -89,5 +100,9 @@ task compare {
         File detailed_log = "detailed_log.txt"
         Int qc_exit_code = read_int("qc_exit_code.txt")
         Boolean qc_passed = read_int("qc_exit_code.txt") == 0
+        # Snapshot data volume (non-system, non-empty tables) — useful for the post-import-timeout re-check.
+        Int total_table_count = read_int("total_table_count.txt")
+        Int total_row_count = read_int("total_row_count.txt")
+        Int total_value_count = read_int("total_value_count.txt")
     }
 }

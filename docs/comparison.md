@@ -21,6 +21,44 @@ Per table, comparing the TDR snapshot (read from **BigQuery**) to the AW (read f
 Both the harmonized **`anvil_*` (Findability Subset)** tables and the **submitter's** study tables are
 compared (all by identical name, 1:1). The primary key is `<table>_id` (the first column).
 
+## Data-volume metrics (table / row / value counts)
+
+Alongside the comparison, the flows report three counts describing **how much tabular data the snapshot
+carries** — an instrument for understanding and managing Terra workspace Data Table capacity (which has
+no hard limit but degrades as volume grows, especially for high-volume clinical/EHR datasets). Computed
+from the TDR snapshot's BigQuery **structural metadata** (`snapshot_data_volume` in `bigquery.py`):
+
+| Metric | Definition |
+|---|---|
+| `total_table_count` | number of tables |
+| `total_row_count` | Σ rows over all tables |
+| `total_value_count` | Σ (rows × columns) per table |
+
+**Counted set = non-system, non-empty tables** — *the same set this comparison treats as the TDR
+baseline*, so **`total_table_count` equals the "N tables compared"** above:
+- **system tables excluded** (e.g. `datarepo_row_ids` — TDR plumbing, never imported; it would roughly
+  *double* the counts), and
+- **empty tables excluded** (`row_count == 0`) — Terra does not import them, so from the Data Tables'
+  perspective they are not "real" tables.
+
+**`total_value_count` uses *schema* columns** (a table's full column count), making it a deliberate,
+**modest over-approximation** of the value volume Terra actually ingests: Terra also drops *empty
+columns* on import, but counting them avoids an expensive per-column scan — exactly what we avoid on the
+large datasets these metrics target. (The two queries — `INFORMATION_SCHEMA.COLUMNS` + a `COUNT(*)` per
+table — do not scan column values, so they stay fast even on huge snapshots.) When column/value
+comparison lands, this can be tightened to non-empty columns.
+
+**Computed early** (before the export/import) and logged at the **start** of a run — so they double as
+an operator heads-up (volume → expected stage durations → likelihood of trouble) and are **available
+even if the import later times out or errors** (the failure case where knowing the size matters most).
+
+**Surfacing & scope:** the canonical line `Data volume (TDR snapshot) — total_table_count=… |
+total_row_count=… | total_value_count=…` (comma thousands separators for readability) appears in the
+**detailed log** and the **QC report**, and as the `Int` workflow outputs `total_table_count` /
+`total_row_count` / `total_value_count` (commas stripped). Reported by **`ade-qc`, `tdr-qc`, and
+`compare`**. **Not** `compare-ingest` — it is intentionally a one-directional, submitter-driven *subset*
+check, so full-snapshot counts there would be misleading.
+
 ## Normalizations (expected differences, not flagged)
 
 The Terra import legitimately transforms the data; these are normalized so they do not cause false
