@@ -4,11 +4,17 @@ import re
 
 from anvil_data_qc import bigquery as bq
 from anvil_data_qc.bigquery import DATA_VOLUME_PREFIX, DataVolume, snapshot_data_volume
+from anvil_data_qc.compare.engine import compare_inventories
+from anvil_data_qc.compare.profile import TDR_SYSTEM_TABLES, ComparisonProfile
+from anvil_data_qc.compare.sources import BigQuerySnapshotSource, TableShape
 
 
 class _Row:
     def __init__(self, **kw):
         self.__dict__.update(kw)
+
+    def __getitem__(self, key):  # the comparison engine reads some rows by key, not attribute
+        return self.__dict__[key]
 
 
 class _Result:
@@ -88,3 +94,80 @@ def test_snapshot_data_volume_logs_the_canonical_line(monkeypatch, caplog):
     with caplog.at_level(logging.INFO, logger=LOGGER_NAME):
         snapshot_data_volume(object(), "p", "d", "b")
     assert any(DATA_VOLUME_PREFIX in r.message for r in caplog.records)
+
+
+class _InventoryFakeClient:
+    """Serves one ``{table: (n_cols, n_rows)}`` fixture to **every** query shape used by both
+    ``snapshot_data_volume`` and the comparison engine's ``BigQuerySnapshotSource``.
+
+    Driving both BigQuery-reading paths from identical data lets us assert they agree on the
+    non-system, non-empty table set -- the equality the docs promise (``total_table_count`` ==
+    the comparison's "N tables compared"). All columns are reported non-empty, so the fixture's
+    row counts alone decide which tables are "real".
+    """
+
+    def __init__(self, fixture):
+        self._fixture = fixture  # {table: (n_cols, n_rows)}
+
+    def query(self, sql):
+        if "n_cols" in sql:  # snapshot_data_volume's column-count query
+            return _Result([_Row(table_name=t, n_cols=c) for t, (c, _) in self._fixture.items()])
+        if "column_name" in sql:  # BigQuerySnapshotSource._columns()
+            return _Result(
+                [
+                    _Row(table_name=t, column_name=f"col{i}", data_type="STRING")
+                    for t, (c, _) in self._fixture.items()
+                    for i in range(c)
+                ]
+            )
+        if "row_count" in sql:  # BigQuerySnapshotSource's per-table non-empty query
+            table = re.search(r"FROM `[^`]+`", sql).group(0)[6:-1].split(".")[-1]
+            ncols, nrows = self._fixture[table]
+            return _Result([_Row(row_count=nrows, **{f"c{i}": nrows for i in range(ncols)})])
+        # snapshot_data_volume's row-count query (SELECT '<t>' AS t, COUNT(*) AS n ...)
+        return _Result([_Row(t=t, n=n) for t, (_, n) in self._fixture.items()])
+
+
+def test_total_table_count_matches_comparison_tables(monkeypatch):
+    """``total_table_count`` must equal the number of TDR tables the comparison engine compares.
+
+    Both quantities derive from BigQuery, via independent code paths (``snapshot_data_volume`` vs
+    ``BigQuerySnapshotSource`` + ``compare_inventories``). This drives both from one shared fixture
+    and asserts they agree, so a future drift in either path's non-system/non-empty table set --
+    which would silently break the equality the docs promise -- is caught here.
+    """
+    fixture = {
+        "anvil_dataset": (8, 1),
+        "anvil_biosample": (12, 5000),
+        "anvil_donor": (10, 4000),
+        "submitter_clinical": (40, 250000),
+        "empty_table": (6, 0),  # 0 rows -> dropped by both paths (not imported into the AW)
+        "datarepo_row_ids": (1, 9000),  # system table -> excluded by both paths
+    }
+    client = _InventoryFakeClient(fixture)
+    monkeypatch.setattr(bq.bigquery, "Client", lambda project, credentials: client)
+
+    vol = snapshot_data_volume(object(), "proj", "ds", "billing", ignore_tables=TDR_SYSTEM_TABLES)
+
+    # The engine reads the same snapshot via BigQuerySnapshotSource and compares it to a candidate
+    # AW that faithfully reflects the non-system, non-empty tables (so the comparison is a clean PASS
+    # and its set of compared TDR tables is exactly the baseline).
+    reference = BigQuerySnapshotSource(client, "proj", "ds").table_inventory()
+    candidate = {
+        t: TableShape(row_count=n, total_columns=c, nonempty_columns=c)
+        for t, (c, n) in fixture.items()
+        if n > 0 and t not in TDR_SYSTEM_TABLES
+    }
+    report = compare_inventories(
+        reference,
+        candidate,
+        ComparisonProfile(),
+        reference_label="TDR",
+        candidate_label="AW",
+    )
+
+    tdr_tables_compared = sum(1 for t in report.tables if t.in_reference)
+    assert vol.total_table_count == tdr_tables_compared == 4
+    assert report.passed  # the fixture is a clean match; nothing should fail
+    # Row counts come from COUNT(*) on both paths -- they must agree over the same baseline too.
+    assert vol.total_row_count == sum(t.reference_rows for t in report.tables if t.in_reference)
