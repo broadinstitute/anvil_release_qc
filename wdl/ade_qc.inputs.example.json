@@ -5,5 +5,5 @@
   "AdeQc.catalog": "anvil14",
   "AdeQc.dry_run": false,
   "AdeQc.allow_controlled_access": false,
-  "AdeQc.docker": "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.2.1"
+  "AdeQc.docker": "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.3.0"
 }
