@@ -83,6 +83,7 @@ class _RunSetup:
     creds: Credentials
     google_token: Callable[[], str]
     log_file: Path
+    identity: str  # the Sam-resolved Terra user the active credentials operate as (identity guard)
 
 
 def _setup_run(
@@ -103,12 +104,47 @@ def _setup_run(
     )
 
     creds = credentials_for_tier(tier)
-    assert_tier_identity(creds, tier)
+    identity = assert_tier_identity(creds, tier)
 
     def google_token() -> str:
         return bearer_token(creds)
 
-    return _RunSetup(tier=tier, creds=creds, google_token=google_token, log_file=log_file)
+    return _RunSetup(
+        tier=tier, creds=creds, google_token=google_token, log_file=log_file, identity=identity
+    )
+
+
+def _log_auth_verified(
+    setup: _RunSetup, flow: str, snapshot_id: str, snapshot_name: str, consent_code: Optional[str]
+) -> dict:
+    """Log the ``--verify-auth`` confirmation and return its result dict (no export/import performed).
+
+    Reached only after the full auth/authorization preflight has passed: the identity guard, the
+    snapshot read (so the operator is entitled to this snapshot), the consent gate, and -- for ade-qc
+    -- the Azul-token check. A clear, self-contained "you are operating as X and may run this" line for
+    an operator who switches identities/credentials between tiers and data programs.
+    """
+    access = "open-access" if is_open_access(consent_code) else "controlled-access (authorized)"
+    logger.info(
+        "✓ AUTH VERIFIED — %s, tier %s: operating as %s; snapshot %r (%s) is readable and "
+        "%s (consentCode=%r). No export/import performed (--verify-auth).",
+        flow,
+        setup.tier.name,
+        setup.identity,
+        snapshot_name,
+        snapshot_id,
+        access,
+        consent_code,
+    )
+    return {
+        "verify_auth": True,
+        "identity": setup.identity,
+        "tier": setup.tier.name,
+        "snapshot_name": snapshot_name,
+        "consent_code": consent_code,
+        "open_access": is_open_access(consent_code),
+        "log_file": str(setup.log_file),
+    }
 
 
 def _create_import_and_qc(
@@ -204,11 +240,14 @@ def run_ade_qc(
     catalog: Optional[str] = None,
     allow_controlled_access: bool = False,
     azul_token_file: Optional[str] = None,
+    verify_auth: bool = False,
 ) -> dict:
     """Run the ADE/Azul export/import flow for one TDR snapshot. Returns the created workspace + log path.
 
-    ``dry_run`` stops after Azul returns the signed URL (steps 1-3) -- no workspace is created and no
-    import is run -- to validate the export side with zero side effects.
+    ``verify_auth`` is an auth/authorization preflight: it runs the identity guard, validates the Azul
+    token, reads the snapshot, and checks the consent gate, then logs a confirmation and returns --
+    **before** any export, signed URL, workspace, or import. ``dry_run`` (weaker) stops after Azul
+    returns the signed URL (steps 1-3) -- no workspace is created and no import is run.
 
     ``allow_controlled_access`` opts in to running on non-open-access snapshots (default off = fail
     closed, open-access only; see ``safety.assert_consent_permitted``). ``azul_token_file`` overrides
@@ -282,6 +321,11 @@ def run_ade_qc(
             tier.name,
         )
 
+    # Auth/authorization preflight: identity + Azul token + snapshot read + consent all verified above.
+    # Stop here -- before any export/signed URL/workspace/import.
+    if verify_auth:
+        return _log_auth_verified(setup, "ade-qc", snapshot_id, name, consent_code)
+
     bq_project, bq_dataset = snapshot_bigquery_access(snapshot)
     logger.info("Snapshot '%s' -> BigQuery %s.%s", name, bq_project, bq_dataset)
 
@@ -335,6 +379,7 @@ def run_tdr_qc(
     log_dir: Path = Path("logs"),
     dry_run: bool = False,
     allow_controlled_access: bool = False,
+    verify_auth: bool = False,
 ) -> dict:
     """Run the TDR direct-export + QC flow for one TDR snapshot. Returns the created workspace + log path.
 
@@ -342,10 +387,13 @@ def run_tdr_qc(
     manifest.json -> Terra import (filetype ``tdrexport``) -> QC. Uses Terra/ADC tokens throughout. For
     very large datasets that fail to export via ADE/Azul.
 
-    ``dry_run`` stops after the export manifest is obtained -- no workspace is created and no import is
-    run. ``allow_controlled_access`` opts in to running on non-open-access snapshots (default off = fail
-    closed, open-access only); no Azul token is needed (the operator's own Terra credentials must grant
-    access to the controlled data). See ``safety.assert_consent_permitted``.
+    ``verify_auth`` is an auth/authorization preflight: it runs the identity guard, reads the snapshot,
+    and checks the consent gate, then logs a confirmation and returns -- **before** any export, signed
+    URL, workspace, or import. ``dry_run`` (weaker) stops after the export manifest is obtained -- no
+    workspace is created and no import is run. ``allow_controlled_access`` opts in to running on
+    non-open-access snapshots (default off = fail closed, open-access only); no Azul token is needed
+    (the operator's own Terra credentials must grant access to the controlled data). See
+    ``safety.assert_consent_permitted``.
     """
     setup = _setup_run(snapshot_id, tier_name, config_path, log_dir)
     tier = setup.tier
@@ -384,6 +432,11 @@ def run_tdr_qc(
             consent_code,
             tier.name,
         )
+
+    # Auth/authorization preflight: identity + snapshot read + consent all verified above. Stop here --
+    # before any export/signed URL/workspace/import.
+    if verify_auth:
+        return _log_auth_verified(setup, "tdr-qc", snapshot_id, name, consent_code)
 
     bq_project, bq_dataset = snapshot_bigquery_access(snapshot)
     logger.info("Snapshot '%s' -> BigQuery %s.%s", name, bq_project, bq_dataset)

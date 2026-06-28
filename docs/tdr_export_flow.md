@@ -41,6 +41,12 @@ TDR (`data.terra.bio` / dev `jade.datarepo-dev…`), Rawls, Firecloud, Sam. The 
 token, no `azul-login`.** The signed manifest/parquet URLs are produced and signed by TDR's own service
 account; the Terra import service fetches them server-side.
 
+**Auth preflight (`--verify-auth`).** `anvil-data-qc tdr-qc --snapshot-id <id> --tier <t> --verify-auth`
+runs the identity guard, reads the snapshot (confirming entitlement), and checks the consent gate, then
+prints a `✓ AUTH VERIFIED` line and exits — **before any export or signed URL**. A quick, side-effect-free
+confidence check, especially when switching between accounts/tiers/data programs. (Same flag on `ade-qc`,
+where it also validates the Azul token.)
+
 ## Flow
 
 ### 1. Start the snapshot export (TDR — asynchronous)

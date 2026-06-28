@@ -1,7 +1,7 @@
 """Command-line entrypoint (Typer).
 
-anvil-data-qc ade-qc --snapshot-id <id> [--tier dev|prod] [--catalog <cat>] [--dry-run] [--config path]
-anvil-data-qc tdr-qc --snapshot-id <id> [--tier dev|prod] [--dry-run] [--config path]
+anvil-data-qc ade-qc --snapshot-id <id> [--tier dev|prod] [--catalog <cat>] [--dry-run] [--verify-auth] [--config path]
+anvil-data-qc tdr-qc --snapshot-id <id> [--tier dev|prod] [--dry-run] [--verify-auth] [--config path]
 anvil-data-qc compare --snapshot-id <id> --workspace-namespace <ns> --workspace-name <name> [...]
 anvil-data-qc compare-ingest --submitter-workspace-namespace <ns> --submitter-workspace-name <name> \
     --snapshot-id <id> [--tier dev|prod] [--config path]
@@ -77,6 +77,12 @@ def ade_qc(
         "--azul-token-file",
         help="Path to an Azul token file, overriding the tier's azul_token_file (used by the WDL).",
     ),
+    verify_auth: bool = typer.Option(
+        False,
+        "--verify-auth",
+        help="Auth preflight: verify identity + Azul token + snapshot access + consent, then exit "
+        "(no export, no signed URL). A quick check before committing to a run.",
+    ),
 ) -> None:
     """Run the ADE/Azul export/import + QC flow for one TDR snapshot."""
     try:
@@ -88,6 +94,7 @@ def ade_qc(
             catalog=catalog,
             allow_controlled_access=allow_controlled_access,
             azul_token_file=azul_token_file,
+            verify_auth=verify_auth,
         )
     except SafetyError as exc:
         # Safety gate (consent / signed-URL hand-off; see safety.py). Clean message, no traceback.
@@ -123,6 +130,12 @@ def tdr_qc(
         "--allow-controlled-access",
         help="Opt in to controlled-access snapshots (any consentCode). Default off = open-access only.",
     ),
+    verify_auth: bool = typer.Option(
+        False,
+        "--verify-auth",
+        help="Auth preflight: verify identity + snapshot access + consent, then exit (no export, no "
+        "signed URL). A quick check before committing to a run.",
+    ),
 ) -> None:
     """Run the TDR direct-export + QC flow for one TDR snapshot.
 
@@ -138,6 +151,7 @@ def tdr_qc(
             config_path=config,
             dry_run=dry_run,
             allow_controlled_access=allow_controlled_access,
+            verify_auth=verify_auth,
         )
     except SafetyError as exc:
         # Safety gate (consent / signed-URL hand-off; see safety.py). Clean message, no traceback.

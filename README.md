@@ -127,6 +127,14 @@ anvil-data-qc tdr-qc --snapshot-id <tdr-snapshot-id> --tier prod
 #   controlled-access: add --allow-controlled-access (no token; your Terra account must have access)
 ```
 
+**Verify your auth first** — a fast, side-effect-free preflight (identity + snapshot access + consent;
+no export, no signed URL). Handy when switching between accounts/tiers/data programs:
+
+```bash
+anvil-data-qc tdr-qc --snapshot-id <tdr-snapshot-id> --tier prod --verify-auth   # also on ade-qc
+#   prints "✓ AUTH VERIFIED — … operating as <you>; snapshot <name> readable and <open|controlled> …"
+```
+
 **Re-check an existing Analysis Workspace against its snapshot:**
 
 ```bash
