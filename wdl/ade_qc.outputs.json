@@ -1,0 +1,12 @@
+{
+  "AdeQc.azul_manifest_minutes": "${this.ade_manifest_minutes}",
+  "AdeQc.detailed_log": "${this.ade_detailed_log}",
+  "AdeQc.import_minutes": "${this.ade_import_minutes}",
+  "AdeQc.qc_exit_code": "${this.ade_qc_exit_code}",
+  "AdeQc.qc_passed": "${this.ade_qc_passed}",
+  "AdeQc.qc_report": "${this.ade_qc_report}",
+  "AdeQc.total_row_count": "${this.total_row_count}",
+  "AdeQc.total_table_count": "${this.total_table_count}",
+  "AdeQc.total_value_count": "${this.total_value_count}",
+  "AdeQc.workspace_create_minutes": "${this.ade_workspace_create_minutes}"
+}

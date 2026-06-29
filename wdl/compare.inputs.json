@@ -1,0 +1,8 @@
+{
+  "Compare.config": "workspace.anvil_data_qc_config",
+  "Compare.workspace_namespace": "anvil-stage-demo",
+  "Compare.workspace_name": "mbaumann_qc_anvil_ade_ANVIL_1000G_high_coverage_2019_20230517_ANV5_202409231755_202606141734",
+  "Compare.snapshot_id": "e8dacaea-d37d-48e5-b0a9-c88777753423",
+  "Compare.tier": "prod",
+  "Compare.docker": "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.3.1"
+}

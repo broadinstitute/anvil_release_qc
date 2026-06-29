@@ -1,0 +1,12 @@
+{
+  "TdrQc.detailed_log": "${this.tdr_detailed_log}",
+  "TdrQc.import_minutes": "${this.tdr_import_minutes}",
+  "TdrQc.qc_exit_code": "${this.tdr_qc_exit_code}",
+  "TdrQc.qc_passed": "${this.tdr_qc_passed}",
+  "TdrQc.qc_report": "${this.tdr_qc_report}",
+  "TdrQc.tdr_export_minutes": "${this.tdr_export_minutes}",
+  "TdrQc.total_row_count": "${this.total_row_count}",
+  "TdrQc.total_table_count": "${this.total_table_count}",
+  "TdrQc.total_value_count": "${this.total_value_count}",
+  "TdrQc.workspace_create_minutes": "${this.tdr_workspace_create_minutes}"
+}
