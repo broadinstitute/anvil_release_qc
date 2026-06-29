@@ -1,0 +1,6 @@
+{
+  "CompareIngest.detailed_log": "${this.detailed_log}",
+  "CompareIngest.qc_exit_code": "${this.qc_exit_code}",
+  "CompareIngest.qc_passed": "${this.qc_passed}",
+  "CompareIngest.qc_report": "${this.qc_report}"
+}

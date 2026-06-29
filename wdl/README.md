@@ -54,7 +54,9 @@ to run a different tag.
 | `compare.wdl` | `compare` | Re-QC an **existing** Analysis Workspace against its TDR snapshot (no import). |
 | `compare_ingest.wdl` | `compare-ingest` | Ingestion QC: submitter (ADSW) workspace vs TDR snapshot. |
 
-Each has a matching `*.inputs.example.json`. Fill in `config`, the workspace/snapshot ids, and `docker`.
+Each workflow has **two** committed config sets (see [§3](#3-runtime-model-credentials--config)):
+- **`*.inputs.example.json`** — a safe, standalone illustration: literal placeholders, `allow_controlled_access: false`, womtool-validatable. Start here to learn the input shape.
+- **`*.inputs.json` + `*.outputs.json`** — the **actual production** Terra method-config (the configs in use in `anvil-stage-demo/mbaumann-anvil-data-qc-20260614`), abstracted via Workspace Data + data-table references so they carry **no secrets or bucket paths** and are portable to any workspace that defines the required Workspace Data keys.
 
 ## 3. Runtime model (credentials & config)
 
@@ -74,6 +76,36 @@ Each has a matching `*.inputs.example.json`. Fill in `config`, the workspace/sna
   own Terra access must cover the controlled data — TDR `/export` 403s otherwise; the import applies the
   snapshot's auth domain, verified by the QC check — see [`docs/tdr_export_flow.md`](../docs/tdr_export_flow.md)).
   Simpler inputs than `ade_qc.wdl` (no `catalog`, no `azul_token`).
+
+### Workspace Data setup (for the production `*.inputs.json`)
+
+The production configs keep environment-specific and secret-adjacent paths **out of git** by binding
+them to Terra attributes instead of literals — workspace-level values via `workspace.<key>` (the
+analogue of a data-table row's `this.<column>`). Set these once per workspace under **Workspace Data**:
+
+| Workspace Data key | Value | Used by |
+|---|---|---|
+| `anvil_data_qc_config` | `gs://` path to the `config.yaml` (with `adc_credentials_file: null`) | all four workflows (`config`) |
+| `anvil_data_qc_azul_token` | `gs://` path to the Azul token file (a **secure** bucket) | `ade-qc` controlled-access only (`azul_token`) |
+
+The `snapshot_id` for `ade-qc`/`tdr-qc` comes from the data table (`this.snapshot_id`); the rest of each
+input (`tier`, `catalog`, `dry_run`, `allow_controlled_access`, `docker`) is a non-sensitive literal. So
+the committed `*.inputs.json` contain no bucket paths or tokens, and the same file runs in any workspace
+that defines the two keys above. (These files are Terra **method-config** exports — the `workspace.`/
+`this.` references resolve only inside Terra; they are not standalone Cromwell inputs. Use the
+`*.inputs.example.json` for womtool — see [§5](#5-validate-wdl-changes-locally).)
+
+**Production vs. example — `allow_controlled_access`.** The example files keep `allow_controlled_access:
+false` (the safe default, so "off unless you mean it" is what a reader sees first); the production
+`ade_qc.inputs.json`/`tdr_qc.inputs.json` honestly show **`true`**. This is deliberate and **security-team
+approved** (all AnVIL data, 2026-06). Committing `true` does **not** weaken the safety model: the
+code/WDL default stays `false`, and the flag is **not itself an access grant** — access still requires the
+operator's own Terra credentials to cover the data (TDR/Azul `403` otherwise), plus a valid Azul token for
+`ade-qc`, and safety layers 2–4 apply on every run. Worst case is benign (a controlled config pointed at
+open-access data just permits it + logs the audit `WARNING`; pointed at data you can't access, it 403s).
+Versioning the `true` makes the controlled-access posture **auditable** rather than a hand-set, unversioned
+Terra value. Unlike the config/token paths, this flag is kept an **explicit literal** (not a `workspace.`
+attribute) precisely because it's a safety setting you want readable in the versioned config.
 
 ### Controlled-access (`ade-qc` only)
 
@@ -130,6 +162,27 @@ The task **always succeeds** so the report is always produced (a *failed* Cromwe
 outputs). Identify failures by the `qc_passed` / `qc_exit_code` columns — no need to open each report.
 (QC comparison time is intentionally *not* reported — it's quick and not a user-experienced delay.)
 
+### One shared data table for `ade-qc` and `tdr-qc` (the production output mapping)
+
+The production `*.outputs.json` route **both** `ade-qc` and `tdr-qc` to the **same data table**, one row
+per snapshot, by **prefixing** each flow's outputs so they coexist without collision:
+
+- `ade-qc` outputs → **`ade_*`** columns (`ade_qc_passed`, `ade_qc_exit_code`, `ade_qc_report`,
+  `ade_detailed_log`, `ade_manifest_minutes`, `ade_workspace_create_minutes`, `ade_import_minutes`).
+- `tdr-qc` outputs → **`tdr_*`** columns (`tdr_qc_passed`, …, `tdr_export_minutes`, `tdr_import_minutes`).
+- the three data-volume counts (`total_table_count` / `total_row_count` / `total_value_count`) are left
+  **unprefixed and shared**: both flows compute them from the *same* TDR snapshot, so they coincide — and
+  the shared column doubles as a **cross-flow consistency check** (a divergence would itself be a signal).
+
+Why one table:
+- the **inputs are already shared** (`snapshot_id`, plus a human-readable snapshot name column);
+- it gives an **at-a-glance overview** of which datasets ran under which pipeline, and their results;
+- it supports **qualitative (PASS/FAIL) and quantitative (durations) comparison** between the two export
+  routes, and the table **exports to TSV** for spreadsheet graphing/reporting.
+
+`compare` / `compare-ingest` use **unprefixed** columns (their own runs, typically a separate table);
+`compare-ingest` emits no count columns (an intentional partial comparison).
+
 ## 5. Validate WDL changes locally
 
 Terra runs Cromwell; validate with the matching [womtool](https://github.com/broadinstitute/cromwell/releases)
@@ -141,3 +194,8 @@ java -jar womtool-92.jar validate -i wdl/ade_qc.inputs.example.json wdl/ade_qc.w
 java -jar womtool-92.jar validate wdl/tdr_qc.wdl
 java -jar womtool-92.jar validate -i wdl/tdr_qc.inputs.example.json wdl/tdr_qc.wdl
 ```
+
+Validate `-i` against the **`*.inputs.example.json`** (literal values). The production `*.inputs.json`
+use Terra `workspace.`/`this.` references that resolve only inside Terra, so they are not standalone
+Cromwell inputs — Terra validates those. A repo test (`tests/test_wdl_versions.py`) separately pins every
+committed `anvil-data-qc:<tag>` image reference (WDL defaults + all inputs JSON) to `__version__`.

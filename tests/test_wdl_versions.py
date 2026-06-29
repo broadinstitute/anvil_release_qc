@@ -1,9 +1,10 @@
 """Guard: every WDL image tag tracks the package version.
 
 The ``anvil-data-qc:<tag>`` image reference appears in several places -- the ``docker`` default in
-each ``wdl/*.wdl`` and the ``docker`` override in each ``wdl/*.inputs.example.json``. These have
-silently drifted from ``__version__`` more than once (an inputs example sat two releases behind).
-This test makes the set self-enforcing: bump ``__version__`` and any stale tag fails here.
+each ``wdl/*.wdl`` and the ``docker`` override in every committed inputs JSON (``*.inputs.example.json``
+and the production ``*.inputs.json``). These have silently drifted from ``__version__`` more than once
+(an inputs example sat two releases behind). This test makes the set self-enforcing: bump
+``__version__`` and any stale tag fails here.
 """
 
 import re
@@ -19,7 +20,9 @@ IMAGE_TAG = re.compile(r"anvil-data-qc:(\d[^\"'\s]*)")
 
 def test_all_wdl_image_tags_match_package_version():
     references = []  # (file, tag)
-    for path in sorted(WDL_DIR.glob("*.wdl")) + sorted(WDL_DIR.glob("*.inputs.example.json")):
+    # All WDLs + all committed inputs JSON (example and production). Outputs JSON carry no image
+    # reference, so globbing every *.json is harmless and future-proofs against new config files.
+    for path in sorted(WDL_DIR.glob("*.wdl")) + sorted(WDL_DIR.glob("*.json")):
         references.extend((path.name, tag) for tag in IMAGE_TAG.findall(path.read_text()))
 
     # Sanity: we actually found the references (so a path/glob change can't make this vacuously pass).
