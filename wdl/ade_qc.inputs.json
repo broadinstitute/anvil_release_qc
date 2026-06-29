@@ -1,10 +1,10 @@
 {
-  "AdeQc.config": "workspace.anvil_data_qc_config",
-  "AdeQc.snapshot_id": "this.snapshot_id",
-  "AdeQc.tier": "prod",
+  "AdeQc.allow_controlled_access": "${true}",
+  "AdeQc.azul_token": "${workspace.anvil_data_qc_azul_token}",
   "AdeQc.catalog": "anvil14",
-  "AdeQc.dry_run": false,
-  "AdeQc.allow_controlled_access": true,
-  "AdeQc.azul_token": "workspace.anvil_data_qc_azul_token",
-  "AdeQc.docker": "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.3.1"
+  "AdeQc.config": "${workspace.anvil_data_qc_config}",
+  "AdeQc.docker": "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.3.1",
+  "AdeQc.dry_run": "${false}",
+  "AdeQc.snapshot_id": "${this.snapshot_id}",
+  "AdeQc.tier": "prod"
 }

@@ -88,12 +88,18 @@ analogue of a data-table row's `this.<column>`). Set these once per workspace un
 | `anvil_data_qc_config` | `gs://` path to the `config.yaml` (with `adc_credentials_file: null`) | all four workflows (`config`) |
 | `anvil_data_qc_azul_token` | `gs://` path to the Azul token file (a **secure** bucket) | `ade-qc` controlled-access only (`azul_token`) |
 
-The `snapshot_id` for `ade-qc`/`tdr-qc` comes from the data table (`this.snapshot_id`); the rest of each
-input (`tier`, `catalog`, `dry_run`, `allow_controlled_access`, `docker`) is a non-sensitive literal. So
-the committed `*.inputs.json` contain no bucket paths or tokens, and the same file runs in any workspace
-that defines the two keys above. (These files are Terra **method-config** exports — the `workspace.`/
-`this.` references resolve only inside Terra; they are not standalone Cromwell inputs. Use the
-`*.inputs.example.json` for womtool — see [§5](#5-validate-wdl-changes-locally).)
+The `snapshot_id` for `ade-qc`/`tdr-qc` comes from the data table; the `config`/`azul_token` paths come
+from Workspace Data; `tier`, `catalog`, and `docker` are non-sensitive literals. So the committed
+`*.inputs.json` contain no bucket paths or tokens, and the same file runs in any workspace that defines
+the two keys above.
+
+These files are Terra **method-config** exports, so values use Terra's serialization: attribute
+references and Boolean/numeric **expressions** appear as `"${…}"` strings — e.g.
+`"${workspace.anvil_data_qc_config}"`, `"${this.snapshot_id}"`, `"${true}"` — while plain **String**
+literals (`tier`, `catalog`, `docker`) stay unwrapped. (An empty `"${}"` is just an optional input left
+blank in the UI — strip those.) The `workspace.`/`this.` references resolve only inside Terra; they are
+**not** standalone Cromwell inputs, so use the `*.inputs.example.json` (literal values) for womtool — see
+[§5](#5-validate-wdl-changes-locally).
 
 **Production vs. example — `allow_controlled_access`.** The example files keep `allow_controlled_access:
 false` (the safe default, so "off unless you mean it" is what a reader sees first); the production
