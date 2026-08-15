@@ -2,8 +2,9 @@
 
 **Automated quality control for AnVIL data releases.**
 
-> **Status:** validated end-to-end against **production** for **open-access** datasets. Controlled-access
-> support is gated pending a security review — see [Security model](#security-model).
+> **Status:** validated end-to-end against **production** for **open-access and controlled-access**
+> datasets. Controlled-access is **security-team approved** (all AnVIL data) and enabled by an explicit,
+> default-off opt-in — see [Security model](#security-model).
 
 ## Table of contents
 
@@ -97,8 +98,10 @@ cp config/config.example.yaml config/config.yaml
 gcloud auth application-default login
 ```
 
-Open-access datasets need nothing more. (Controlled-access additionally requires
-`anvil-data-qc azul-login --tier <tier>` — deferred pending the security review.)
+Open-access datasets need nothing more. Controlled-access is enabled with the default-off
+`--allow-controlled-access` opt-in (security-team approved): `ade-qc` additionally needs an Azul token
+(`anvil-data-qc azul-login --tier <tier>`), while `tdr-qc` needs none — your own Terra account must
+already grant access to the controlled data.
 
 ### The common commands
 
@@ -268,6 +271,6 @@ ruff check . && ruff format --check .   # lint + format
 
 ## Status & license
 
-Validated end-to-end against **production** for **open-access** datasets — the full
-`ADSW → TDR → ADE → AW` pipeline is under automated QC. Controlled-access is deferred pending a security
-review. Licensed under [`LICENSE`](LICENSE).
+Validated end-to-end against **production** for **open-access and controlled-access** datasets — the full
+`ADSW → TDR → ADE → AW` pipeline is under automated QC. Controlled-access is security-team approved and
+enabled by a default-off opt-in (see [Security model](#security-model)). Licensed under [`LICENSE`](LICENSE).

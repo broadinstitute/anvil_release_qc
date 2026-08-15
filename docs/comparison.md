@@ -59,6 +59,26 @@ total_row_count=… | total_value_count=…` (comma thousands separators for rea
 `compare`**. **Not** `compare-ingest` — it is intentionally a one-directional, submitter-driven *subset*
 check, so full-snapshot counts there would be misleading.
 
+## Terra Data Table import ceiling (observed 2026-06)
+
+These metrics exist because some datasets are **too large for Terra to import into Data Tables at all**.
+The largest anvil14 clinical/EHR dataset — **17 tables, ~13.1M rows, ~142M values** — **failed to import
+even after ~11 h 42 m**. Terra's import service (cWDS) enforces an effective **~6 h job TTL** via a
+periodic reaper scan, giving a real-world ceiling of roughly **6–12 h** depending on when a job starts
+relative to the scan; this dataset exceeded even the long end. The import is **transactional** — on
+failure the workspace Data Tables are left **empty** (no partial import), and the `importJob` reports
+`status: "Error"` ("Job failed to complete in 6 hours").
+
+What this means for QC:
+- `ade-qc` / `tdr-qc` compare the AW **after** the import, so a dataset that won't import has **no
+  populated workspace to compare** — the AW-vs-snapshot check simply cannot run for it. The **data-volume
+  metrics still report** (they are computed before the import), so a failed row still shows *how big* the
+  dataset was.
+- **`compare-ingest` (ADSW → TDR, no import) is unaffected** and remains the QC coverage for such datasets.
+- The tool's `importJob` wait is capped at **2 h** (`wait_for_import`); past that it reports a timeout with
+  partial stage durations. Even an unbounded wait would hit Terra's ~6–12 h reaper, so raising it would
+  **not** import these datasets — the ceiling is Terra's, not the tool's. Tracked as risk **R4**.
+
 ## Normalizations (expected differences, not flagged)
 
 The Terra import legitimately transforms the data; these are normalized so they do not cause false
@@ -150,9 +170,15 @@ workspace:
 - **Cell values are not compared (deferred, T4).** No value-level comparison is done; type
   representation, DRS/file-reference forms, arrays, and null-vs-empty are not verified. **→ Spot-check
   values, and that DRS/file references resolve.**
-- **Auth domain on controlled-access** has so far been validated only against an open-access dataset
-  (1000G — empty domain on both sides). **→ Confirm the check on a controlled dataset before relying
-  on it for compliance.**
+- **Very large datasets may exceed Terra's Data Table import capacity — the AW comparison then can't run.**
+  `ade-qc` / `tdr-qc` compare the AW *after* the import; if the import can't complete (see
+  [Terra Data Table import ceiling](#terra-data-table-import-ceiling-observed-2026-06)), there is no
+  workspace to compare. **→ For such datasets, rely on `compare-ingest` (ADSW → TDR, no import) plus the
+  data-volume metrics; the AW-vs-snapshot check is unavailable until the data can be imported.**
+
+(The **auth-domain check** *is* validated against real controlled-access datasets — a non-empty domain via
+`ade-qc` on 2026-06-26 and `tdr-qc` on the prod `ANVIL_dGTEx_GRU_v1` snapshot on 2026-06-27 — so it is no
+longer a limitation; see the auth-domain row under "What it checks".)
 
 These deferrals are intentional under release time pressure; the engine's seams (`TabularDataSource`,
 `ComparisonProfile`, `compare`) are built so each is an additive enhancement, not a rewrite.
