@@ -4,47 +4,71 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-The design is fully derisked, and the **export/import flow plus the first QC layer are implemented and
-validated against dev**. The package `src/anvil_data_qc/` provides: `config` (YAML + pydantic, tier
-resolution), `auth` (ADC per tier + identity guard), `azul_auth` (Azul token capture/validation),
-`logging_setup`, `clients/` (base + `tdr`, `azul`, `rawls`, `firecloud`, `sam`), `bigquery`,
-`workspace` (naming), `compare/` (the comparison seams: `sources`, `profile`, `engine`, `report`,
-`authdomain`, `qc`, and `ingest`), `pipeline` (the wired flow), and `cli` (Typer: `ade-qc`, `tdr-qc`,
-`compare`, `compare-ingest`, `azul-login`). The ADE/Azul export/import pipeline (`ade-qc`) runs TDR →
-BigQuery `dataset_id` → Azul manifest → Rawls `createWorkspace` → Firecloud `importJob` → **QC**
-(AW-vs-snapshot table comparison + auth-domain verification). A **second route, `tdr-qc`**
-([`docs/tdr_export_flow.md`](docs/tdr_export_flow.md)), reaches the same QC via a **direct TDR snapshot
-export** (no ADE/Azul; Terra/ADC tokens throughout) → signed `manifest.json` → the **same** Rawls/
-Firecloud import tail (`importJob` `filetype: tdrexport`, `tdrSyncPermissions: false`) → the **same** QC
-— for very large datasets that fail ADE export. Open-access by default; **controlled-access via the same
-default-off `--allow-controlled-access` opt-in as ade-qc** (no Azul token — the operator's Terra creds
-must grant the controlled access). The two flows share `pipeline._create_import_and_qc` (the import+QC tail). Separately,
-**`compare-ingest`** covers the upstream `ADSW → TDR` step
-(submitter workspace vs TDR snapshot; table presence + exact row-count parity, driven from the
-submitter side) — the ingestion-completeness check. For deployment, a code-only **Docker image**
-(`Dockerfile`) plus four **womtool-validated WDL** wrappers (`wdl/{ade_qc,tdr_qc,compare,compare_ingest}.wdl`)
-run the same CLI non-interactively in Terra — see [`wdl/README.md`](wdl/README.md).
+`anvil-data-qc` is **built, deployed as `:0.3.1`, and in production use**. The package
+`src/anvil_data_qc/` provides: `config` (YAML + pydantic, tier resolution), `auth` (ADC per tier +
+Sam-resolved identity guard), `azul_auth` (Azul token capture/validation), `logging_setup` + `redaction`
+(structured, secret-redacted request/response logging), `timing` (per-stage durations), `clients/` (base
++ `tdr`, `azul`, `rawls`, `firecloud`, `sam`), `bigquery` (Azul `dataset_id` resolution + snapshot
+**data-volume metrics**), `workspace` (naming), `compare/` (the comparison seams: `sources`, `profile`,
+`engine`, `report`, `authdomain`, `qc`, `ingest`), `safety` (the 4-layer controlled-access defense),
+`pipeline` (the wired flows), and `cli` (Typer: `ade-qc`, `tdr-qc`, `compare`, `compare-ingest`,
+`azul-login`).
 
-**Status of the implementation:**
+**Four operations — two export routes share one QC tail:**
+- **`ade-qc`** — ADE/Azul export: TDR → BigQuery `dataset_id` → Azul PFB manifest → Rawls
+  `createWorkspace` → Firecloud `importJob` (`filetype: pfb`) → **QC**.
+- **`tdr-qc`** ([`docs/tdr_export_flow.md`](docs/tdr_export_flow.md)) — a **direct TDR snapshot export**
+  (no ADE/Azul; Terra/ADC tokens throughout) → signed `manifest.json` → the **same** import tail
+  (`importJob` `filetype: tdrexport`, `tdrSyncPermissions: false`) → the **same** QC — for very large
+  datasets that fail ADE export.
+- **`compare`** — re-run the QC on an existing workspace, no import.
+- **`compare-ingest`** — the upstream `ADSW → TDR` ingestion-completeness check (submitter workspace vs
+  TDR snapshot; table presence + exact row-count parity, driven from the submitter side).
+
+The two export flows share `pipeline._create_import_and_qc` (the import+QC tail). **QC** = AW-vs-snapshot
+table comparison (T1–T2: table parity, row counts, column-count sanity) + auth-domain verification.
+
+**Cross-cutting capabilities:**
+- **Controlled-access** via the default-off `--allow-controlled-access` opt-in on both `ade-qc` and
+  `tdr-qc` (Broad security-team approved 2026-06 — no restrictions, all AnVIL data). `ade-qc` also needs
+  an Azul token; `tdr-qc` needs none (the operator's own Terra creds must grant the access). See
+  `safety.py` and risk **R8**; keep the opt-in **default-off** and do not weaken layers 2–4.
+- **`--verify-auth`** — a fast, side-effect-free preflight (identity guard → Azul token (ade) →
+  retrieveSnapshot → consent gate → exit **before** any export/signed URL).
+- **Data-volume metrics** (`total_table_count` / `total_row_count` / `total_value_count`) and **per-stage
+  durations** (minutes) — computed early and surfaced even on a failed/timed-out import, and exposed as
+  WDL outputs; instruments for the Terra Data Table capacity question (below).
+
+For deployment, a code-only **Docker image** (`Dockerfile`) plus four **womtool-validated WDL** wrappers
+(`wdl/{ade_qc,tdr_qc,compare,compare_ingest}.wdl`) run the same CLI non-interactively in Terra. Each WDL
+has two committed config sets — a safe `*.inputs.example.json` and the portable **production**
+`*.inputs.json` + `*.outputs.json` (secrets abstracted to Terra Workspace Data). See
+[`wdl/README.md`](wdl/README.md).
+
+**Status (through v0.3.1 — deployed and in production use):**
 - ✅ Unit tests pass (`pytest`, mocked HTTP) and `ruff` is clean.
-- ✅ **Validated end-to-end against dev** for the **open-access 1000G** snapshot: TDR → BigQuery →
-  Azul (anonymous) → workspace → import → **`compare` reports QC PASS** (12 tables; row + column-count
-  parity; empty TDR tables and `datarepo_row_ids` correctly excluded; auth-domain match).
-- ✅ **Validated end-to-end for a controlled-access snapshot** (2026-06-26, the
-  `ANVIL_ccdg_asc_ndd_daly_talkowski_cdcseed_asd_…` snapshot): the `ade-qc` flow ran with
-  `--allow-controlled-access` + an Azul token and reported **QC PASS** (12 tables, full row parity, 0
-  failing). This is the **first exercise of the auth-domain check against a real, non-empty domain**
-  (snapshot vs workspace both `AUTH_anvil_ccdg_asc_ndd_daly_talkowski_cdcseed_asd` → match), which the
-  open-access 1000G snapshot cannot test (its auth domain is empty). The run also proved out the
-  Sam-resolved identity guard, the multi-user `authorized_users` allowlist, and the `:0.2.1` image
-  together (run as the human account `sa-mbaumann@broadinstitute.org`).
+- ✅ **Open-access** validated end-to-end on **dev and prod** (1000G): `compare` reports QC PASS
+  (12 tables; row + column-count parity; empty TDR tables and `datarepo_row_ids` excluded; auth-domain
+  match).
+- ✅ **Controlled-access** validated end-to-end: `ade-qc` against a **real non-empty auth domain**
+  (2026-06-26, the `ANVIL_ccdg_asc_ndd_daly_talkowski_cdcseed_asd_…` snapshot → QC PASS, auth-domain
+  match — the first exercise of the auth-domain check against a non-empty domain), and `tdr-qc` in
+  **prod** (2026-06-27, the `ANVIL_dGTEx_GRU_v1` GRU snapshot → QC PASS, `AUTH_AnVIL_dGTEx_GRU_v1` on
+  both sides). Proved out the Sam-resolved identity guard and the multi-user `authorized_users` allowlist.
+- ✅ **Prod batch** run: the open-access anvil14 snapshots via `ade-qc`, and 8 large clinical/EHR datasets
+  via `tdr-qc`.
+- ⚠️ **Terra Data Table import ceiling discovered:** the largest clinical/EHR dataset (17 tables /
+  ~13.1M rows / ~142M values) **failed to import** even after ~11h42m — Terra's import service has a ~6 h
+  job TTL enforced by a periodic reaper (effective max ~6–12 h), and this dataset exceeds it. The import
+  is transactional (empty tables on failure); the data-volume metrics quantify the scale, and
+  `compare-ingest` (no import) still works for such datasets. See risk **R4** and
+  [`docs/comparison.md`](docs/comparison.md).
 - ⏭️ **Deferred QC depth** (see [`docs/comparison.md`](docs/comparison.md)): full column-name
   comparison, T3 id-set parity, T4 cell-value comparison.
 
 Environment: Python **3.13.14** (pyenv; pinned in `.python-version`), local `.venv`, deps from
 `pyproject.toml` with pinned `requirements.txt` / `requirements-dev.txt` (pip-tools). See the README
-for developer setup, and [`docs/risk_register.md`](docs/risk_register.md) for tracked risks (review
-after the first dev-tier run).
+for developer setup, and [`docs/risk_register.md`](docs/risk_register.md) for tracked risks.
 
 ## What this project does
 
@@ -150,8 +174,8 @@ flow itself is specified in [`docs/export_import_flow.md`](docs/export_import_fl
 - **pip + pip-tools** — deps declared in `pyproject.toml`, compiled to pinned `requirements.txt`
   (runtime) + `requirements-dev.txt` (dev); Docker installs from the pinned files.
 - **PyYAML + pydantic v2** (config), **Typer** (CLI), **requests** (HTTP), **google-auth** (ADC →
-  tokens + BigQuery), **google-cloud-bigquery** (a *core* dependency — see below), **pandas**
-  (comparison phase), **ruff** + **pytest** (dev).
+  tokens + BigQuery), **google-cloud-bigquery** (a *core* dependency — see below), **ruff** + **pytest**
+  (dev). (The comparison phase uses only the standard library — plain dicts/dataclasses, no pandas.)
 - `src/`-layout package holding all logic; a non-interactive **CLI** entrypoint; **thin notebooks**
   that import the package (no logic); deployable as a **Docker image run via WDL** — identical code
   path in all three.

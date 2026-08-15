@@ -13,7 +13,7 @@ of R2) is retired by *doing* rather than planning.
 | R1 | Export/import mechanics assumed, not verified | High | **Retired (open-access)** — full flow validated end-to-end on dev incl. import→Done |
 | R2 | Controlled-access correctness (auth domain; dev/prod parity) | High (compliance) | Model resolved — import auto-applies; QC verifies post-import |
 | R3 | Comparison fidelity: expected vs. unexpected differences | High | T1–T2 implemented + validated (1000G PASS); T3–T4 + column-name deferred |
-| R4 | Batch-scale robustness & retained-workspace cost/quota | Medium | Watching |
+| R4 | Batch-scale robustness, retained-workspace cost/quota, **Terra import ceiling** | Medium | Watching — import ceiling found (2026-06) |
 | R5 | Multi-org API drift / reverse-engineered UI flow | Medium (rising over time) | Mitigating |
 | R6 | Premature generalization in our own design | Medium | Watching |
 | R7 | Azul controlled-access auth for headless/batch | Medium (manual path works) | Understood — APAT index-only *by design*; interactive token + `azul-login` (built); native-client ask = security-neutral long-term fix |
@@ -78,7 +78,18 @@ don't collide on an existing workspace (the primary use case); the earlier per-d
 suited interactive use but blocked same-day reruns. Trade-off: faster workspace accumulation.
 **Mitigation:** Plan a cleanup/lifecycle path for accumulated and failed-run workspaces; track
 workspace count/cost; revisit idempotency/resume once real rerun patterns are seen.
-**Revisit:** After the first batch run.
+**Update (2026-06 — Terra Data Table import ceiling):** the first prod batch surfaced a hard capacity
+limit. The largest clinical/EHR dataset (17 tables / ~13.1M rows / ~142M values) **failed to import even
+after ~11h42m** — Terra's import service (cWDS) enforces a ~6 h job TTL via a periodic reaper (effective
+ceiling ~6–12 h), and this dataset exceeds it. The import is transactional (empty Data Tables on failure;
+`importJob` → `status: "Error"`). So some datasets **cannot be QC'd via the AW comparison**
+(`ade-qc`/`tdr-qc`) at all; `compare-ingest` (no import) and the data-volume metrics
+(`total_table_count`/`total_row_count`/`total_value_count`, reported even on a failed row) remain the
+coverage for them. The tool's 2 h `importJob` wait is deliberate — raising it would not beat Terra's
+reaper. See [`comparison.md`](comparison.md#terra-data-table-import-ceiling-observed-2026-06).
+**Revisit:** first batch run done (2026-06). Open: a cleanup/lifecycle path for accumulated + failed-run
+workspaces, and how to QC datasets that exceed the import ceiling (out-of-band import? a BigQuery-only
+comparison that needs no AW?).
 
 ### R5 — Multi-org API drift / reverse-engineered UI flow
 **Impact:** We mirror an interactive flow that may use endpoints not intended as stable public APIs,

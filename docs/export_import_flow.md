@@ -10,16 +10,19 @@ automation mirrors. Endpoints and per-tier URLs: [`services.md`](services.md).
 > never as inputs. If the downstream index (Azul) disagrees with the snapshot, that is a *finding*,
 > not something to work around.
 
-> **Validation status (2026-06-11):** the full flow has been run end-to-end against the **dev** tier
-> for an **open-access** snapshot — TDR → BigQuery → Azul (anonymous) → `createWorkspace` →
-> `importJob` → `Done`. The **controlled-access** path depends on resolving Azul auth (see
-> [Authentication](#authentication)).
+> **Validation status:** the full flow has been run end-to-end against the **dev** tier for an
+> **open-access** snapshot (2026-06-11) — TDR → BigQuery → Azul (anonymous) → `createWorkspace` →
+> `importJob` → `Done` — and, for **controlled-access**, against a real non-empty auth domain
+> (2026-06-26, the `ANVIL_ccdg_asc_ndd_daly_talkowski_cdcseed_asd_…` snapshot) → **QC PASS** (auth-domain
+> match). See [Authentication](#authentication) for the controlled-access Azul token.
 
-> **⚠️ Safety gate — open-access only (for now).** This pipeline is **not yet approved for
-> controlled-access data**. It proceeds only when the snapshot's top-level `consentCode` is exactly
-> `NRES`; any other value — including empty/unknown — is **blocked before any PFB signed URL is
-> generated** (a controlled-access signed URL is highly sensitive — see risk **R8** and
-> `src/anvil_data_qc/safety.py`). Controlled-access requires a security-team review first.
+> **Safety gate — open-access by default; controlled-access via opt-in.** By default this pipeline
+> proceeds only when the snapshot's top-level `consentCode` is exactly `NRES`; any other value —
+> including empty/unknown — is **blocked before any PFB signed URL is generated** (a controlled-access
+> signed URL is highly sensitive — see risk **R8** and `src/anvil_data_qc/safety.py`). Controlled-access
+> is **security-team approved** (2026-06, all AnVIL data) and enabled by the explicit, default-off
+> `--allow-controlled-access` opt-in (`safety.assert_consent_permitted`); it additionally requires an
+> Azul token (see [Authentication](#authentication)). Layers 2–4 apply on every run.
 
 ## Identifiers (worked example from the capture)
 
@@ -158,7 +161,8 @@ apply it. **Do not fetch or set the auth domain ourselves.**
    - **expected == actual.** An empty or mismatched workspace auth domain on a controlled dataset is
      a **QC failure**.
 2. **Tabular comparison**: AW data tables (Rawls entities) vs the TDR snapshot tables (BigQuery) —
-   same tables, columns, row counts, etc., with expected-difference normalization (design deferred).
+   same tables, columns, row counts, etc., with expected-difference normalization (implemented, T1–T2;
+   see [`comparison.md`](comparison.md)).
 3. **Secondary Azul-agreement checks** *(not on the critical path — findings, not drivers)*:
    - Azul `sources[].source_id` == the input snapshot id;
    - Azul `datasets[].dataset_id` == the snapshot's `anvil_dataset.dataset_id`.
@@ -166,8 +170,9 @@ apply it. **Do not fetch or set the auth domain ourselves.**
 ## Notes
 
 - **Auth:** see [Authentication](#authentication) — TDR/BigQuery/Terra use the gcloud ADC token; Azul
-  needs its own (open-access = anonymous; controlled-access = unresolved). `Authorization` is always
-  logged redacted; Terra calls also send an `x-app-id` header.
+  needs its own (open-access = anonymous; controlled-access = an interactive Azul token via `azul-login`).
+  `Authorization` is always logged redacted. (The interactive UI also sends an `x-app-id` header on Terra
+  calls; the automation does not replicate it.)
 - **BigQuery is a core dependency**, needed in §1 (dataset_id resolution) — not only the comparison
   phase.
 - The PFB manifest is an **Avro** file served from **S3** via an AWS presigned URL (temporary STS
