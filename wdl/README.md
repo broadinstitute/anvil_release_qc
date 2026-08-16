@@ -56,7 +56,7 @@ to run a different tag.
 
 Each workflow has **two** committed config sets (see [§3](#3-runtime-model-credentials--config)):
 - **`*.inputs.example.json`** — a safe, standalone illustration: literal placeholders, `allow_controlled_access: false`, womtool-validatable. Start here to learn the input shape.
-- **`*.inputs.json` + `*.outputs.json`** — the **actual production** Terra method-config (the configs in use in `anvil-stage-demo/mbaumann-anvil-data-qc-20260614`), abstracted via Workspace Data + data-table references so they carry **no secrets or bucket paths** and are portable to any workspace that defines the required Workspace Data keys.
+- **`*.inputs.json` + `*.outputs.json`** — the **actual production** Terra method-config (the configs in use in `anvil-developer-work/anvil-data-qc-shared`), abstracted via Workspace Data + data-table references so they carry **no secrets or bucket paths** and are portable to any workspace that defines the required Workspace Data keys and data-table columns.
 
 ## 3. Runtime model (credentials & config)
 
@@ -88,18 +88,18 @@ analogue of a data-table row's `this.<column>`). Set these once per workspace un
 | `anvil_data_qc_config` | `gs://` path to the `config.yaml` (with `adc_credentials_file: null`) | all four workflows (`config`) |
 | `anvil_data_qc_azul_token` | `gs://` path to the Azul token file (a **secure** bucket) | `ade-qc` controlled-access only (`azul_token`) |
 
-The `snapshot_id` for `ade-qc`/`tdr-qc` comes from the data table; the `config`/`azul_token` paths come
-from Workspace Data; `tier`, `catalog`, and `docker` are non-sensitive literals. So the committed
-`*.inputs.json` contain no bucket paths or tokens, and the same file runs in any workspace that defines
-the two keys above.
+The `snapshot_id` and — for `ade-qc` — the `ade_catalog` come from the per-release **data table**; the
+`config`/`azul_token` paths come from **Workspace Data**; `tier` and `docker` are non-sensitive literals.
+So the committed `*.inputs.json` contain no bucket paths or tokens, and the same file runs across releases
+and in any workspace that defines the Workspace Data keys above and the data-table columns (see §4).
 
 These files are Terra **method-config** exports, so values use Terra's serialization: attribute
 references and Boolean/numeric **expressions** appear as `"${…}"` strings — e.g.
-`"${workspace.anvil_data_qc_config}"`, `"${this.snapshot_id}"`, `"${true}"` — while plain **String**
-literals (`tier`, `catalog`, `docker`) stay unwrapped. (An empty `"${}"` is just an optional input left
-blank in the UI — strip those.) The `workspace.`/`this.` references resolve only inside Terra; they are
-**not** standalone Cromwell inputs, so use the `*.inputs.example.json` (literal values) for womtool — see
-[§5](#5-validate-wdl-changes-locally).
+`"${workspace.anvil_data_qc_config}"`, `"${this.snapshot_id}"`, `"${this.ade_catalog}"`, `"${true}"` —
+while plain **String** literals (`tier`, `docker`) stay unwrapped. (An empty `"${}"` is just an optional
+input left blank in the UI — strip those.) The `workspace.`/`this.` references resolve only inside Terra;
+they are **not** standalone Cromwell inputs, so use the `*.inputs.example.json` (literal values) for
+womtool — see [§5](#5-validate-wdl-changes-locally).
 
 **Production vs. example — `allow_controlled_access`.** The example files keep `allow_controlled_access:
 false` (the safe default, so "off unless you mean it" is what a reader sees first); the production
@@ -168,10 +168,16 @@ The task **always succeeds** so the report is always produced (a *failed* Cromwe
 outputs). Identify failures by the `qc_passed` / `qc_exit_code` columns — no need to open each report.
 (QC comparison time is intentionally *not* reported — it's quick and not a user-experienced delay.)
 
-### One shared data table for `ade-qc` and `tdr-qc` (the production output mapping)
+### One data table per release, shared by `ade-qc` and `tdr-qc`
 
-The production `*.outputs.json` route **both** `ade-qc` and `tdr-qc` to the **same data table**, one row
-per snapshot, by **prefixing** each flow's outputs so they coexist without collision:
+The shared QC workspace (`anvil-developer-work/anvil-data-qc-shared`) holds **one data table per AnVIL
+release** — e.g. `anvil15_qc` for anvil15 — so multiple releases' QC results live side by side. Each row
+is one snapshot; its **input columns** are `snapshot_id`, a human-readable snapshot name, and
+**`ade_catalog`** (the Azul catalog for that release, e.g. `anvil15`). `ade-qc` reads the catalog from the
+row (`this.ade_catalog`) rather than a hardcoded literal, so **one workflow config serves every release**.
+
+The production `*.outputs.json` route **both** `ade-qc` and `tdr-qc` back to that same per-release table,
+**prefixing** each flow's outputs so they coexist without collision:
 
 - `ade-qc` outputs → **`ade_*`** columns (`ade_qc_passed`, `ade_qc_exit_code`, `ade_qc_report`,
   `ade_detailed_log`, `ade_manifest_minutes`, `ade_workspace_create_minutes`, `ade_import_minutes`).
@@ -180,8 +186,8 @@ per snapshot, by **prefixing** each flow's outputs so they coexist without colli
   **unprefixed and shared**: both flows compute them from the *same* TDR snapshot, so they coincide — and
   the shared column doubles as a **cross-flow consistency check** (a divergence would itself be a signal).
 
-Why one table:
-- the **inputs are already shared** (`snapshot_id`, plus a human-readable snapshot name column);
+Why one table per release:
+- the **inputs are shared** (`snapshot_id` + snapshot name + `ade_catalog`);
 - it gives an **at-a-glance overview** of which datasets ran under which pipeline, and their results;
 - it supports **qualitative (PASS/FAIL) and quantitative (durations) comparison** between the two export
   routes, and the table **exports to TSV** for spreadsheet graphing/reporting.

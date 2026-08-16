@@ -62,7 +62,7 @@ def ade_qc(
     catalog: Optional[str] = typer.Option(
         None,
         "--catalog",
-        help="Azul catalog (the data release). Omit in dev (uses the default); set in prod, e.g. --catalog anvil14.",
+        help="Azul catalog (the data release). Omit in dev (uses the default); set in prod, e.g. --catalog anvil15.",
     ),
     dry_run: bool = typer.Option(
         False,
