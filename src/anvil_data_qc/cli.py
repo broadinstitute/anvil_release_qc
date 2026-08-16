@@ -25,7 +25,7 @@ from .azul_auth import (
     validate_azul_token,
     write_azul_token,
 )
-from .bigquery import snapshot_data_volume
+from .bigquery import BigQueryAccessError, check_bigquery_access, snapshot_data_volume
 from .clients.tdr import TdrClient, snapshot_bigquery_access
 from .compare.ingest import run_ingest_comparison
 from .compare.profile import TDR_SYSTEM_TABLES
@@ -82,8 +82,8 @@ def ade_qc(
     verify_auth: bool = typer.Option(
         False,
         "--verify-auth",
-        help="Auth preflight: verify identity + Azul token + snapshot access + consent, then exit "
-        "(no export, no signed URL). A quick check before committing to a run.",
+        help="Auth preflight: verify identity + Azul token + snapshot access + consent + BigQuery "
+        "access, then exit (no export, no signed URL). A quick check before committing to a run.",
     ),
 ) -> None:
     """Run the ADE/Azul export/import + QC flow for one TDR snapshot."""
@@ -98,8 +98,9 @@ def ade_qc(
             azul_token_file=azul_token_file,
             verify_auth=verify_auth,
         )
-    except SafetyError as exc:
-        # Safety gate (consent / signed-URL hand-off; see safety.py). Clean message, no traceback.
+    except (SafetyError, BigQueryAccessError) as exc:
+        # Safety gate (consent / signed-URL hand-off) or BigQuery preflight failure -- see safety.py /
+        # bigquery.check_bigquery_access. Clean message, no traceback.
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from exc
     if (
@@ -135,8 +136,8 @@ def tdr_qc(
     verify_auth: bool = typer.Option(
         False,
         "--verify-auth",
-        help="Auth preflight: verify identity + snapshot access + consent, then exit (no export, no "
-        "signed URL). A quick check before committing to a run.",
+        help="Auth preflight: verify identity + snapshot access + consent + BigQuery access, then exit "
+        "(no export, no signed URL). A quick check before committing to a run.",
     ),
 ) -> None:
     """Run the TDR direct-export + QC flow for one TDR snapshot.
@@ -155,8 +156,9 @@ def tdr_qc(
             allow_controlled_access=allow_controlled_access,
             verify_auth=verify_auth,
         )
-    except SafetyError as exc:
-        # Safety gate (consent / signed-URL hand-off; see safety.py). Clean message, no traceback.
+    except (SafetyError, BigQueryAccessError) as exc:
+        # Safety gate (consent / signed-URL hand-off) or BigQuery preflight failure -- see safety.py /
+        # bigquery.check_bigquery_access. Clean message, no traceback.
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from exc
     if (
@@ -195,10 +197,15 @@ def compare(
         return bearer_token(creds)
 
     try:
+        check_bigquery_access(creds, resolved.billing_google_project_id)
         snapshot = TdrClient(resolved.url("tdr"), google_token).retrieve_snapshot(snapshot_id)
         bq_project, bq_dataset = snapshot_bigquery_access(snapshot)
         volume = snapshot_data_volume(
-            creds, bq_project, bq_dataset, resolved.billing_project, ignore_tables=TDR_SYSTEM_TABLES
+            creds,
+            bq_project,
+            bq_dataset,
+            resolved.billing_google_project_id,
+            ignore_tables=TDR_SYSTEM_TABLES,
         )
         result = run_qc_comparison(
             creds=creds,
@@ -210,8 +217,8 @@ def compare(
             workspace_name=workspace_name,
             token_provider=google_token,
         )
-    except SafetyError as exc:
-        # Safety gate (e.g. a bearer-token destination violation; see safety.py). Clean message.
+    except (SafetyError, BigQueryAccessError) as exc:
+        # Safety gate (e.g. a bearer-token destination violation) or BigQuery preflight failure. Clean message.
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from exc
     # Report to stdout (captured as qc_report.txt by the WDL), with the data-volume line at the end so
@@ -258,6 +265,7 @@ def compare_ingest(
         return bearer_token(creds)
 
     try:
+        check_bigquery_access(creds, resolved.billing_google_project_id)
         snapshot = TdrClient(resolved.url("tdr"), google_token).retrieve_snapshot(snapshot_id)
         bq_project, bq_dataset = snapshot_bigquery_access(snapshot)
         report = run_ingest_comparison(
@@ -269,8 +277,8 @@ def compare_ingest(
             submitter_workspace_name=submitter_workspace_name,
             token_provider=google_token,
         )
-    except SafetyError as exc:
-        # Safety gate (e.g. a bearer-token destination violation; see safety.py). Clean message.
+    except (SafetyError, BigQueryAccessError) as exc:
+        # Safety gate (e.g. a bearer-token destination violation) or BigQuery preflight failure. Clean message.
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from exc
     typer.echo(report.render())

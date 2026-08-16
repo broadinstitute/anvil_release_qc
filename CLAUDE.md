@@ -4,7 +4,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-`anvil-data-qc` is **built, deployed as `:0.3.1`, and in production use**. The package
+`anvil-data-qc` is **built and in production use** (deployed image `:0.3.1`; repo now at `0.3.2`,
+pending publish). The package
 `src/anvil_data_qc/` provides: `config` (YAML + pydantic, tier resolution), `auth` (ADC per tier +
 Sam-resolved identity guard), `azul_auth` (Azul token capture/validation), `logging_setup` + `redaction`
 (structured, secret-redacted request/response logging), `timing` (per-stage durations), `clients/` (base
@@ -202,9 +203,14 @@ flow itself is specified in [`docs/export_import_flow.md`](docs/export_import_fl
 - Scopes: plain `gcloud auth application-default login` (defaults `openid`, `email`,
   `cloud-platform`) — no custom scope string.
 
-**Config (YAML):** per-tier `{email, ADC file path, billing project, azul_token_file}` plus the shared service URLs
-(from [`services.md`](docs/services.md)). Committed non-secret `config.example.yaml` + **gitignored**
-per-developer `config.yaml`.
+**Config (YAML):** per-tier `{email, ADC file path, terra_billing_project, billing_google_project_id,
+azul_token_file}` plus the shared service URLs (from [`services.md`](docs/services.md)). Committed
+non-secret `config.example.yaml` + **gitignored** per-developer `config.yaml`. **Two distinct project
+values** (they coincided only for some legacy billing projects, so keep them separate): `terra_billing_project`
+= the Terra billing project (a.k.a. workspace namespace) that ade-qc/tdr-qc create workspaces under;
+`billing_google_project_id` = a **real Google Cloud Project ID** (the Terra Workspace Google Project ID,
+e.g. `terra-xxxxxxxx`) that **BigQuery jobs run in / are billed to** (and requester-pays later) — *not* the
+Terra billing project. `check_bigquery_access` preflights it (also in `--verify-auth`).
 
 **Workspace creation:** one **retained** workspace **per run**. Name =
 `<user-local-part>_<infix>_<sanitized full snapshot name>_YYYYMMDDHHMM` (run start time,

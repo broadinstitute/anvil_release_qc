@@ -34,7 +34,7 @@ from .azul_auth import (
     read_azul_token,
     validate_azul_token,
 )
-from .bigquery import resolve_dataset_id, snapshot_data_volume
+from .bigquery import check_bigquery_access, resolve_dataset_id, snapshot_data_volume
 from .clients.azul import AzulClient
 from .clients.firecloud import FirecloudClient, import_job_id
 from .clients.rawls import RawlsClient
@@ -100,7 +100,8 @@ def _setup_run(
         version=__version__,
         tier=tier.name,
         snapshot_id=snapshot_id,
-        billing_project=tier.billing_project,
+        terra_billing_project=tier.terra_billing_project,
+        billing_google_project_id=tier.billing_google_project_id,
         log_file=str(log_file),
     )
 
@@ -121,9 +122,10 @@ def _log_auth_verified(
     """Log the ``--verify-auth`` confirmation and return its result dict (no export/import performed).
 
     Reached only after the full auth/authorization preflight has passed: the identity guard, the
-    snapshot read (so the operator is entitled to this snapshot), the consent gate, and -- for ade-qc
-    -- the Azul-token check. A clear, self-contained "you are operating as X and may run this" line for
-    an operator who switches identities/credentials between tiers and data programs.
+    snapshot read (so the operator is entitled to this snapshot), the consent gate, the BigQuery-access
+    check (``check_bigquery_access``), and -- for ade-qc -- the Azul-token check. A clear, self-contained
+    "you are operating as X and may run this" line for an operator who switches identities/credentials
+    between tiers and data programs.
     """
     access = "open-access" if is_open_access(consent_code) else "controlled-access (authorized)"
     logger.info(
@@ -175,10 +177,10 @@ def _create_import_and_qc(
     # Rawls: create the destination workspace (empty auth domain; the import applies it).
     ws_name = workspace_name(tier.email, name, infix=infix)
     rawls = RawlsClient(tier.url("rawls"), google_token)
-    logger.info("Creating workspace %s/%s", tier.billing_project, ws_name)
+    logger.info("Creating workspace %s/%s", tier.terra_billing_project, ws_name)
     try:
         with stage_timer("workspace_create", durations):
-            rawls.create_workspace(tier.billing_project, ws_name, description=description)
+            rawls.create_workspace(tier.terra_billing_project, ws_name, description=description)
 
         # Firecloud: import and wait for the job to succeed. Dev Terra can be slow (createWorkspace
         # alone took ~20s); give the import submit/polls headroom.
@@ -195,13 +197,17 @@ def _create_import_and_qc(
         )
         with stage_timer("import", durations):
             submit = firecloud.submit_import_job(
-                tier.billing_project, ws_name, signed_url, filetype=filetype, options=import_options
+                tier.terra_billing_project,
+                ws_name,
+                signed_url,
+                filetype=filetype,
+                options=import_options,
             )
             job_id = import_job_id(submit)
             logger.info("Import job submitted: %s", job_id)
-            firecloud.wait_for_import(tier.billing_project, ws_name, job_id)
+            firecloud.wait_for_import(tier.terra_billing_project, ws_name, job_id)
 
-        logger.info("Export/import complete. Workspace: %s/%s", tier.billing_project, ws_name)
+        logger.info("Export/import complete. Workspace: %s/%s", tier.terra_billing_project, ws_name)
 
         # QC: compare the AW data tables to the TDR snapshot (T1-T2) and verify the auth domain. (QC is
         # not a timed stage -- quick, not a user-experienced delay, like the `compare` command.)
@@ -211,17 +217,19 @@ def _create_import_and_qc(
             snapshot_id=snapshot_id,
             bq_project=bq_project,
             bq_dataset=bq_dataset,
-            namespace=tier.billing_project,
+            namespace=tier.terra_billing_project,
             workspace_name=ws_name,
             token_provider=google_token,
         )
         logger.info("QC report:\n%s", qc.render())
         if not qc.passed:
             logger.warning(
-                "QC FAILED for %s/%s -- see the report above.", tier.billing_project, ws_name
+                "QC FAILED for %s/%s -- see the report above.",
+                tier.terra_billing_project,
+                ws_name,
             )
         return {
-            "workspace_namespace": tier.billing_project,
+            "workspace_namespace": tier.terra_billing_project,
             "workspace_name": ws_name,
             "snapshot_name": name,
             "qc_passed": qc.passed,
@@ -250,9 +258,10 @@ def run_ade_qc(
     """Run the ADE/Azul export/import flow for one TDR snapshot. Returns the created workspace + log path.
 
     ``verify_auth`` is an auth/authorization preflight: it runs the identity guard, validates the Azul
-    token, reads the snapshot, and checks the consent gate, then logs a confirmation and returns --
-    **before** any export, signed URL, workspace, or import. ``dry_run`` (weaker) stops after Azul
-    returns the signed URL (steps 1-3) -- no workspace is created and no import is run.
+    token, reads the snapshot, checks the consent gate, and verifies BigQuery access
+    (``check_bigquery_access``), then logs a confirmation and returns -- **before** any export, signed
+    URL, workspace, or import. ``dry_run`` (weaker) stops after Azul returns the signed URL (steps 1-3)
+    -- no workspace is created and no import is run.
 
     ``allow_controlled_access`` opts in to running on non-open-access snapshots (default off = fail
     closed, open-access only; see ``safety.assert_consent_permitted``). ``azul_token_file`` overrides
@@ -326,8 +335,13 @@ def run_ade_qc(
             tier.name,
         )
 
-    # Auth/authorization preflight: identity + Azul token + snapshot read + consent all verified above.
-    # Stop here -- before any export/signed URL/workspace/import.
+    # BigQuery reachability preflight: confirm jobs can run in billing_google_project_id (a trivial
+    # SELECT 1) so a wrong project fails cleanly here -- including under --verify-auth -- rather than as
+    # a mid-run traceback. See check_bigquery_access.
+    check_bigquery_access(setup.creds, tier.billing_google_project_id)
+
+    # Auth/authorization preflight: identity + Azul token + snapshot read + consent + BigQuery all
+    # verified above. Stop here -- before any export/signed URL/workspace/import.
     if verify_auth:
         return _log_auth_verified(setup, "ade-qc", snapshot_id, name, consent_code)
 
@@ -337,11 +351,17 @@ def run_ade_qc(
     # Data-volume metrics from the snapshot (logged now, before the export/import, so they are
     # available even if a later step fails). Excludes system + empty tables; see snapshot_data_volume.
     volume = snapshot_data_volume(
-        setup.creds, bq_project, bq_dataset, tier.billing_project, ignore_tables=TDR_SYSTEM_TABLES
+        setup.creds,
+        bq_project,
+        bq_dataset,
+        tier.billing_google_project_id,
+        ignore_tables=TDR_SYSTEM_TABLES,
     )
 
     # 2. BigQuery: resolve the Azul dataset_id from the snapshot (system of record).
-    dataset_id = resolve_dataset_id(setup.creds, bq_project, bq_dataset, tier.billing_project)
+    dataset_id = resolve_dataset_id(
+        setup.creds, bq_project, bq_dataset, tier.billing_google_project_id
+    )
 
     # 3. Azul: generate the PFB manifest and obtain the signed S3 URL (token validated above).
     durations: dict[str, float] = {}
@@ -403,8 +423,9 @@ def run_tdr_qc(
     very large datasets that fail to export via ADE/Azul.
 
     ``verify_auth`` is an auth/authorization preflight: it runs the identity guard, reads the snapshot,
-    and checks the consent gate, then logs a confirmation and returns -- **before** any export, signed
-    URL, workspace, or import. ``dry_run`` (weaker) stops after the export manifest is obtained -- no
+    checks the consent gate, and verifies BigQuery access (``check_bigquery_access``), then logs a
+    confirmation and returns -- **before** any export, signed URL, workspace, or import. ``dry_run``
+    (weaker) stops after the export manifest is obtained -- no
     workspace is created and no import is run. ``allow_controlled_access`` opts in to running on
     non-open-access snapshots (default off = fail closed, open-access only); no Azul token is needed
     (the operator's own Terra credentials must grant access to the controlled data). See
@@ -448,8 +469,13 @@ def run_tdr_qc(
             tier.name,
         )
 
-    # Auth/authorization preflight: identity + snapshot read + consent all verified above. Stop here --
-    # before any export/signed URL/workspace/import.
+    # BigQuery reachability preflight: confirm jobs can run in billing_google_project_id (a trivial
+    # SELECT 1) so a wrong project fails cleanly here -- including under --verify-auth -- rather than as
+    # a mid-run traceback. See check_bigquery_access.
+    check_bigquery_access(setup.creds, tier.billing_google_project_id)
+
+    # Auth/authorization preflight: identity + snapshot read + consent + BigQuery all verified above.
+    # Stop here -- before any export/signed URL/workspace/import.
     if verify_auth:
         return _log_auth_verified(setup, "tdr-qc", snapshot_id, name, consent_code)
 
@@ -459,7 +485,11 @@ def run_tdr_qc(
     # Data-volume metrics from the snapshot (logged now, before the export/import, so they are
     # available even if a later step fails). Excludes system + empty tables; see snapshot_data_volume.
     volume = snapshot_data_volume(
-        setup.creds, bq_project, bq_dataset, tier.billing_project, ignore_tables=TDR_SYSTEM_TABLES
+        setup.creds,
+        bq_project,
+        bq_dataset,
+        tier.billing_google_project_id,
+        ignore_tables=TDR_SYSTEM_TABLES,
     )
 
     # 2-3. TDR: export the snapshot (async) and obtain the signed manifest.json URL.

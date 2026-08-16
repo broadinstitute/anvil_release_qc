@@ -54,7 +54,7 @@ def run_qc_comparison(
     """Compare the AW data tables to the TDR snapshot (T1-T2) and verify the auth domain."""
     profile = profile or ComparisonProfile()
 
-    bq = bigquery.Client(project=tier.billing_project, credentials=creds)
+    bq = bigquery.Client(project=tier.billing_google_project_id, credentials=creds)
     reference = BigQuerySnapshotSource(bq, bq_project, bq_dataset)
     rawls = RawlsClient(tier.url("rawls"), token_provider, timeout=180)
     candidate = RawlsWorkspaceSource(rawls, namespace, workspace_name)

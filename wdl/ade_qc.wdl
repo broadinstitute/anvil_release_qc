@@ -22,7 +22,7 @@ workflow AdeQc {
         Boolean dry_run = false
         Boolean allow_controlled_access = false
         File? azul_token
-        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.3.1"
+        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.3.2"
     }
 
     call ade_qc {
@@ -82,7 +82,8 @@ task ade_qc {
 
         # Open-access by default; controlled-access requires allow_controlled_access=true + azul_token.
         # The pipeline logs to stderr; capture the exit code without failing the task. 0 = PASS,
-        # 1 = QC failure, 2 = safety abort (e.g. a controlled-access snapshot without the opt-in).
+        # 1 = QC failure, 2 = safety abort (e.g. a controlled snapshot without the opt-in) or a
+        # preflight/config failure (e.g. a misconfigured billing_google_project_id).
         set +e
         anvil-data-qc ade-qc \
             --config "~{config}" \

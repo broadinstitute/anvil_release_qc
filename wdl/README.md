@@ -67,7 +67,11 @@ Each workflow has **two** committed config sets (see [§3](#3-runtime-model-cred
   human accounts under the tier's `authorized_users:` (the guard and the Azul-token check allow any
   account in `email` ∪ `authorized_users`; each operator mints their own Azul token as themselves).
 - **`config` is a File input** — the same `config.yaml` the CLI uses, with **`adc_credentials_file: null`**
-  so ADC falls back to that runtime identity. Store it in a bucket and pass its `gs://` path.
+  so ADC falls back to that runtime identity. Store it in a bucket and pass its `gs://` path. It must set
+  **two distinct projects** per tier: **`terra_billing_project`** (the Terra billing project = workspace
+  namespace that ade-qc/tdr-qc create workspaces under) and **`billing_google_project_id`** (a real Google
+  Cloud Project ID — the Terra **Workspace** Google Project ID, e.g. `terra-xxxxxxxx` — that BigQuery jobs
+  run in / are billed to; **not** the Terra billing project). `--verify-auth` preflights BigQuery access to it.
 - **`ade-qc` is open-access by default**: Azul is queried anonymously (the consent gate enforces
   `consentCode == "NRES"`), so **no Azul token is needed**. `compare` / `compare-ingest` never touch Azul.
 - **`tdr-qc` never touches Azul** — it exports directly from TDR using the runtime Terra credentials, so
@@ -136,7 +140,7 @@ Every workflow runs to completion and emits:
 | Output | Meaning |
 |---|---|
 | `qc_passed` (Boolean) | the headline result — **sort/filter this column** in your data table to find failures |
-| `qc_exit_code` (Int) | `0` = PASS, `1` = QC failure, `2` = safety abort (e.g. a non-open-access snapshot blocked by the consent gate) |
+| `qc_exit_code` (Int) | `0` = PASS, `1` = QC failure, `2` = safety abort (e.g. a non-open-access snapshot blocked by the consent gate) **or a preflight/config failure** (e.g. a misconfigured `billing_google_project_id`) |
 | `qc_report` (File) | the human-readable comparison report (ends with the stage-timing summary line) |
 | `detailed_log` (File) | the full redacted request/response log |
 

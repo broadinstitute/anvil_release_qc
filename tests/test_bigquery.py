@@ -2,8 +2,16 @@
 
 import re
 
+import pytest
+
 from anvil_data_qc import bigquery as bq
-from anvil_data_qc.bigquery import DATA_VOLUME_PREFIX, DataVolume, snapshot_data_volume
+from anvil_data_qc.bigquery import (
+    DATA_VOLUME_PREFIX,
+    BigQueryAccessError,
+    DataVolume,
+    check_bigquery_access,
+    snapshot_data_volume,
+)
 from anvil_data_qc.compare.engine import compare_inventories
 from anvil_data_qc.compare.profile import TDR_SYSTEM_TABLES, ComparisonProfile
 from anvil_data_qc.compare.sources import BigQuerySnapshotSource, TableShape
@@ -171,3 +179,39 @@ def test_total_table_count_matches_comparison_tables(monkeypatch):
     assert report.passed  # the fixture is a clean match; nothing should fail
     # Row counts come from COUNT(*) on both paths -- they must agree over the same baseline too.
     assert vol.total_row_count == sum(t.reference_rows for t in report.tables if t.in_reference)
+
+
+# --- check_bigquery_access (the --verify-auth / fail-fast BigQuery preflight) ---
+
+
+class _OkClient:
+    def query(self, sql):
+        return _Result([_Row(ok=1)])
+
+
+class _BoomClient:
+    def query(self, sql):
+        raise RuntimeError("400 BadRequest ... ProjectId must be non-empty")
+
+
+def test_check_bigquery_access_ok(monkeypatch):
+    # A reachable project: the trivial SELECT 1 succeeds -> no raise, and it logs a success line.
+    monkeypatch.setattr(bq.bigquery, "Client", lambda project, credentials: _OkClient())
+    check_bigquery_access(object(), "terra-abc123")  # no raise
+
+
+def test_check_bigquery_access_empty_project_raises():
+    # Fail-fast if the project is unset (the field is required, but guard the empty case too).
+    with pytest.raises(BigQueryAccessError):
+        check_bigquery_access(object(), "")
+
+
+def test_check_bigquery_access_wraps_backend_error_with_guidance(monkeypatch):
+    # The real failure mode: billing_google_project_id set to a non-runnable project (e.g. a Terra
+    # billing project). The backend error is wrapped in a guided BigQueryAccessError.
+    monkeypatch.setattr(bq.bigquery, "Client", lambda project, credentials: _BoomClient())
+    with pytest.raises(BigQueryAccessError) as excinfo:
+        check_bigquery_access(object(), "anvil-developer-work")
+    msg = str(excinfo.value)
+    assert "anvil-developer-work" in msg  # names the offending project
+    assert "Google Project ID" in msg  # points at the Terra Workspace Google Project ID fix

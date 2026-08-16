@@ -15,7 +15,7 @@ workflow Compare {
         String workspace_name
         String snapshot_id
         String? tier
-        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.3.1"
+        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.3.2"
     }
 
     call compare {
@@ -65,7 +65,8 @@ task compare {
         set -euo pipefail
 
         # stdout -> the report; stderr -> the detailed request/response log. Capture the exit code
-        # without failing the task. 0 = PASS, 1 = QC failure, 2 = safety abort.
+        # without failing the task. 0 = PASS, 1 = QC failure, 2 = safety abort or a preflight/config
+        # failure (e.g. a misconfigured billing_google_project_id).
         set +e
         anvil-data-qc compare \
             --config "~{config}" \
