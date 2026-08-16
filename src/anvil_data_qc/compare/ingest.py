@@ -46,7 +46,7 @@ def run_ingest_comparison(
         label=f"submitter workspace {submitter_namespace}/{submitter_workspace_name}",
     )
 
-    bq = bigquery.Client(project=tier.billing_project, credentials=creds)
+    bq = bigquery.Client(project=tier.billing_google_project_id, credentials=creds)
     candidate = BigQuerySnapshotSource(bq, bq_project, bq_dataset)
 
     return compare_coverage(

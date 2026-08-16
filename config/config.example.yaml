@@ -25,8 +25,13 @@ tiers:
     # then copy ~/.config/gcloud/application_default_credentials.json to this path.
     # Omit (or set null) to use the ambient runtime identity (e.g. in a Terra workflow).
     adc_credentials_file: ~/.config/anvil-data-qc/adc-dev.json
-    # Terra billing project = the workspace namespace for created workspaces.
-    billing_project: your-dev-billing-project
+    # Terra billing project = the workspace namespace that ade-qc/tdr-qc create workspaces under.
+    terra_billing_project: your-dev-billing-project
+    # Google Cloud Project ID to run/bill Google Cloud operations against -- BigQuery jobs now, and
+    # requester-pays access later. This is a REAL GCP project id: the Terra WORKSPACE Google Project ID
+    # (Terra workspace dashboard -> Cloud Information -> Google Project ID, e.g. terra-xxxxxxxx), NOT the
+    # Terra billing project above. (They coincide for some legacy billing projects, but not in general.)
+    billing_google_project_id: terra-xxxxxxxx
     # Azul access-token file (gitignored). Populate it with:  anvil-data-qc azul-login --tier dev
     # Azul needs a token issued to its own OAuth client; a plain gcloud ADC token is rejected.
     azul_token_file: secrets/azul-token-dev.txt
@@ -36,5 +41,6 @@ tiers:
   prod:
     email: you@example.org
     adc_credentials_file: ~/.config/anvil-data-qc/adc-prod.json
-    billing_project: your-prod-billing-project
+    terra_billing_project: your-prod-billing-project
+    billing_google_project_id: terra-xxxxxxxx
     azul_token_file: secrets/azul-token-prod.txt

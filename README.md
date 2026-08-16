@@ -91,7 +91,8 @@ pip install -e .
 
 # 2. Configure your per-tier settings (config/config.yaml is gitignored)
 cp config/config.example.yaml config/config.yaml
-#    fill in, per tier: email, adc_credentials_file, billing_project, azul_token_file
+#    fill in, per tier: email, adc_credentials_file, terra_billing_project,
+#    billing_google_project_id (the Terra Workspace Google Project ID for BigQuery), azul_token_file
 
 # 3. Sign in to Google (serves TDR, BigQuery, Terra). The active account must match
 #    the tier's configured `email` — enforced at runtime by the identity guard.

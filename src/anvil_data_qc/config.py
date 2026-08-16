@@ -41,7 +41,12 @@ class TierConfig(BaseModel):
     email: str
     # None -> use the ambient ADC identity (e.g. a Terra workflow's runtime service account).
     adc_credentials_file: Optional[str] = None
-    billing_project: str
+    # The Terra billing project (a.k.a. workspace namespace) that ade-qc/tdr-qc create workspaces under.
+    terra_billing_project: str
+    # The Google Cloud Project ID to run/bill Google Cloud operations against -- BigQuery jobs now, and
+    # requester-pays access later. This is a real GCP project id (the Terra Workspace Google Project ID,
+    # e.g. terra-xxxxxxxx), NOT the Terra billing project. See config.example.yaml.
+    billing_google_project_id: str
     # File holding this tier's Azul access token (gitignored secret); populated by `azul-login`.
     azul_token_file: Optional[str] = None
     # The Azul OAuth client id a token must carry as `azp`. Optional: auto-discovered from Azul's
@@ -63,7 +68,8 @@ class ResolvedTier(BaseModel):
     name: str
     email: str
     adc_credentials_file: Optional[str]
-    billing_project: str
+    terra_billing_project: str
+    billing_google_project_id: str
     azul_token_file: Optional[str]
     azul_oauth2_client_id: Optional[str] = None
     authorized_users: list[str] = []
@@ -98,7 +104,8 @@ def resolve_tier(config: AppConfig, tier_name: Optional[str] = None) -> Resolved
         name=name,
         email=tc.email,
         adc_credentials_file=tc.adc_credentials_file,
-        billing_project=tc.billing_project,
+        terra_billing_project=tc.terra_billing_project,
+        billing_google_project_id=tc.billing_google_project_id,
         azul_token_file=tc.azul_token_file,
         azul_oauth2_client_id=tc.azul_oauth2_client_id,
         authorized_users=tc.authorized_users,

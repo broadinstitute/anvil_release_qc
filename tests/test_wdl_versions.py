@@ -14,7 +14,7 @@ from anvil_data_qc import __version__
 
 WDL_DIR = Path(__file__).resolve().parent.parent / "wdl"
 # Match only concrete version tags (start with a digit), so the parameter_meta doc placeholder
-# ``.../anvil-data-qc:<tag>.`` is ignored while real ``...:0.3.1`` references are checked.
+# ``.../anvil-data-qc:<tag>.`` is ignored while real ``...:0.3.2`` references are checked.
 IMAGE_TAG = re.compile(r"anvil-data-qc:(\d[^\"'\s]*)")
 
 

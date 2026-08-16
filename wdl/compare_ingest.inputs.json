@@ -1,6 +1,6 @@
 {
   "CompareIngest.config": "${workspace.anvil_data_qc_config}",
-  "CompareIngest.docker": "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.3.1",
+  "CompareIngest.docker": "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.3.2",
   "CompareIngest.snapshot_id": "e8dacaea-d37d-48e5-b0a9-c88777753423",
   "CompareIngest.submitter_workspace_name": "1000G-high-coverage-2019",
   "CompareIngest.submitter_workspace_namespace": "anvil-datastorage",

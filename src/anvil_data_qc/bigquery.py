@@ -52,15 +52,54 @@ class DataVolume:
         )
 
 
+class BigQueryAccessError(RuntimeError):
+    """Raised when BigQuery jobs cannot run in the configured ``billing_google_project_id``.
+
+    Carries a guided message for the common setup mistake: ``billing_google_project_id`` must be a real
+    Google Cloud Project ID (the Terra Workspace Google Project ID, e.g. ``terra-xxxxxxxx``) where the
+    active identity can run BigQuery jobs -- NOT the Terra billing project. The CLI presents this cleanly.
+    """
+
+
+def check_bigquery_access(credentials: Credentials, billing_google_project_id: str) -> None:
+    """Preflight: verify a trivial BigQuery job can run in ``billing_google_project_id``.
+
+    Runs ``SELECT 1`` billed to ``billing_google_project_id`` -- read-only and scans no data (it does
+    create a lightweight BigQuery job record) -- so a missing/misconfigured project (e.g. the Terra
+    billing project mistakenly used as a GCP project id) surfaces here, including in ``--verify-auth``,
+    with a clear message instead of as a mid-run traceback. Raises ``BigQueryAccessError`` on any failure
+    (a wrong project id, missing BigQuery Job User, or a transient BigQuery/credentials error).
+    """
+    if not billing_google_project_id:
+        raise BigQueryAccessError(
+            "billing_google_project_id is not set. It must be a real Google Cloud Project ID (the Terra "
+            "Workspace Google Project ID, e.g. terra-xxxxxxxx) where BigQuery jobs can run."
+        )
+    client = bigquery.Client(project=billing_google_project_id, credentials=credentials)
+    try:
+        next(iter(client.query("SELECT 1 AS ok").result()), None)
+    except Exception as exc:
+        raise BigQueryAccessError(
+            f"Cannot run BigQuery jobs in billing_google_project_id={billing_google_project_id!r}: {exc}. "
+            "Most often this means billing_google_project_id is wrong: it must be a real Google Cloud "
+            "Project ID -- the Terra Workspace Google Project ID (Terra workspace dashboard -> Cloud "
+            "Information -> Google Project ID, e.g. terra-xxxxxxxx), NOT the Terra billing project -- and "
+            "the active identity needs BigQuery Job User on it (see config.example.yaml). It may also be a "
+            "transient BigQuery error or expired credentials, in which case retry / re-authenticate."
+        ) from exc
+    logger.info("BigQuery access OK: can run jobs in %s.", billing_google_project_id)
+
+
 def resolve_dataset_id(
-    credentials: Credentials, bq_project: str, bq_dataset: str, billing_project: str
+    credentials: Credentials, bq_project: str, bq_dataset: str, billing_google_project_id: str
 ) -> str:
     """Return the single ``dataset_id`` from the snapshot's ``anvil_dataset`` table.
 
-    ``bq_project``/``bq_dataset`` identify the snapshot's BigQuery dataset (from TDR); the query is
-    billed to ``billing_project``. Zero or more than one row is treated as an error / QC finding.
+    ``bq_project``/``bq_dataset`` identify the snapshot's BigQuery dataset (from TDR); the query runs in
+    (is billed to) ``billing_google_project_id``. Zero or more than one row is treated as an error / QC
+    finding.
     """
-    client = bigquery.Client(project=billing_project, credentials=credentials)
+    client = bigquery.Client(project=billing_google_project_id, credentials=credentials)
     # Table identifiers cannot be parameterized; bq_project/bq_dataset come from TDR (trusted).
     query = f"SELECT dataset_id FROM `{bq_project}.{bq_dataset}.anvil_dataset`"
     logger.info("Resolving dataset_id: %s", query)
@@ -78,7 +117,7 @@ def snapshot_data_volume(
     credentials: Credentials,
     bq_project: str,
     bq_dataset: str,
-    billing_project: str,
+    billing_google_project_id: str,
     *,
     ignore_tables: Collection[str] = (),
 ) -> DataVolume:
@@ -97,9 +136,9 @@ def snapshot_data_volume(
     them would require an expensive per-column ``COUNTIF`` scan -- exactly what we avoid on these large
     datasets. The two queries here (one ``INFORMATION_SCHEMA.COLUMNS``, one ``COUNT(*)`` per table) do
     **not** scan column values, so this stays cheap even on huge datasets and is computed up front --
-    available even if a later export/import times out or errors. Billed to ``billing_project``.
+    available even if a later export/import times out or errors. Billed to ``billing_google_project_id``.
     """
-    client = bigquery.Client(project=billing_project, credentials=credentials)
+    client = bigquery.Client(project=billing_google_project_id, credentials=credentials)
     ignore = set(ignore_tables)
     # 1. Tables + schema column counts (one cheap INFORMATION_SCHEMA query).
     col_query = (
