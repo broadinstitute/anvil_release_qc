@@ -54,7 +54,7 @@ workflow AdeQc {
         config: "Per-tier config.yaml (set adc_credentials_file: null for deployment)."
         snapshot_id: "TDR snapshot id to export and QC. Open-access unless allow_controlled_access=true."
         tier: "Tier (dev|prod). Optional; defaults to the config's default_tier."
-        catalog: "Azul catalog (e.g. anvil14 in prod). Omit in dev."
+        catalog: "Azul catalog (e.g. anvil15 in prod). Omit in dev."
         dry_run: "Validate the export side only (TDR -> BigQuery -> Azul); create no workspace, no import."
         allow_controlled_access: "Opt in to controlled-access snapshots (any consentCode). Default false = open-access only."
         azul_token: "Azul token file (secure bucket) for controlled-access; required when allow_controlled_access=true."

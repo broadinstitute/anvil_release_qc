@@ -109,7 +109,7 @@ protection. Tracked as risk **R7**.
 - `format=verbatim.pfb` — "verbatim" mirrors the source, which is what QC wants.
 - **Catalog (the data release):** a catalog is the indexed data for one AnVIL release. **Dev**
   defaults to catalog `anvil` (omit the param). **Prod** requires the *new release's* catalog
-  explicitly (e.g. `catalog=anvil14`) — that release is being QC'd before it becomes the default, so
+  explicitly (e.g. `catalog=anvil15`) — that release is being QC'd before it becomes the default, so
   do not rely on the prod default. The tool exposes `--catalog` (omit in dev; set in prod).
 - **Auth:** see [Authentication](#authentication). Open-access works anonymously; controlled-access
   needs an Azul-accepted token.

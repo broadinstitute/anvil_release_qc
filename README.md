@@ -118,7 +118,7 @@ anvil-data-qc compare-ingest \
 **Full release QC (ADE/Azul export) — export a snapshot to a new workspace and verify it:**
 
 ```bash
-anvil-data-qc ade-qc --snapshot-id <tdr-snapshot-id> --tier prod --catalog anvil14
+anvil-data-qc ade-qc --snapshot-id <tdr-snapshot-id> --tier prod --catalog anvil15
 #   add --dry-run to validate the export side only (no workspace created, no import run)
 ```
 
