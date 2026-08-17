@@ -9,6 +9,7 @@ from anvil_data_qc.azul_auth import (
     expected_client_id,
     extract_bearer_token,
     read_azul_token,
+    token_from_file_text,
     validate_azul_token,
     write_azul_token,
 )
@@ -149,6 +150,18 @@ def test_read_token_empty_or_comments_returns_none(tmp_path):
     f = tmp_path / "tok.txt"
     f.write_text("# only comments\n\n")
     assert read_azul_token(_tier(token_file=str(f))) is None
+
+
+def test_token_from_file_text_skips_comment_header():
+    text = (
+        "# Azul access token for tier 'prod' — SECRET, DO NOT COMMIT.\n"
+        "# account: sa-user@broadinstitute.org   azp: 111.apps.googleusercontent.com\n"
+        "\n"
+        "the-token-value\n"  # placeholder (not a real ya29.* token) so git-secrets doesn't flag it
+    )
+    assert token_from_file_text(text) == "the-token-value"
+    assert token_from_file_text("# only comments\n\n") is None
+    assert token_from_file_text("") is None
 
 
 def test_write_then_read_roundtrip(tmp_path):
