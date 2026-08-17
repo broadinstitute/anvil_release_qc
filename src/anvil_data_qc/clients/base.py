@@ -49,6 +49,7 @@ class BaseClient:
         params: Optional[dict] = None,
         json_body: Optional[Any] = None,
         headers: Optional[dict] = None,
+        timeout: Optional[float] = None,
     ) -> requests.Response:
         url = path if path.startswith("http") else f"{self.base_url}/{path.lstrip('/')}"
         all_headers = {"Accept": "application/json", **(headers or {}), **self._auth_header()}
@@ -81,7 +82,12 @@ class BaseClient:
             logger.debug("  body: %s", redact_text(json.dumps(json_body)))
 
         resp = self._session.request(
-            method, url, params=params, json=json_body, headers=all_headers, timeout=self._timeout
+            method,
+            url,
+            params=params,
+            json=json_body,
+            headers=all_headers,
+            timeout=self._timeout if timeout is None else timeout,
         )
 
         # Log the response status and any correlation/trace ids.

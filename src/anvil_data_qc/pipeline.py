@@ -79,26 +79,26 @@ TDR_SYNC_PERMISSIONS = False
 
 # Rawls createWorkspace provisions a GCS bucket and is the slow call in the tail; run several-wide by
 # the batch runner it can exceed the default 60s client timeout even while Rawls is healthy. Give it
-# generous headroom, and -- if the POST still times out -- verify whether the workspace was created
-# rather than abandoning an orphaned (import-less) one. See docs/export_import_flow.md and risk R4.
+# generous headroom, and -- if the POST still times out -- confirm-or-adopt the workspace (see
+# _create_workspace_resilient) rather than abandoning an orphaned (import-less) one. See risk R4.
 RAWLS_TIMEOUT = 300  # seconds
-WORKSPACE_ADOPT_ATTEMPTS = (
-    3  # GET retries after a createWorkspace timeout, to let it become visible
-)
-WORKSPACE_ADOPT_POLL_SECONDS = 5.0
+WORKSPACE_ADOPT_ATTEMPTS = 5  # GETs to confirm the workspace after a create timeout
+WORKSPACE_ADOPT_POLL_SECONDS = 5.0  # between those GETs
+WORKSPACE_ADOPT_GET_TIMEOUT = 30  # per-GET timeout, so a slow GET is not governed by RAWLS_TIMEOUT
 
 
 def _create_workspace_resilient(
     rawls: RawlsClient, namespace: str, name: str, *, description: str
 ) -> None:
-    """Create the destination workspace, tolerating a createWorkspace read-timeout.
+    """Create the destination workspace, tolerating a createWorkspace timeout.
 
     Rawls createWorkspace can be slow under concurrent load, so the POST may time out client-side even
     though Rawls created the workspace server-side; aborting there leaves an orphaned, import-less
     workspace (observed under batch QC at ``--max-concurrent 5``). On a timeout/connection error we
-    therefore GET the workspace: if it now exists we adopt it and continue into the import; if it never
-    appears the create genuinely failed and we re-raise. A ``409`` (name already exists) is not a
-    timeout and stays a fail-fast error, exactly as before.
+    therefore GET the workspace (retrying a not-yet-visible 404 or a transient GET timeout): if it
+    exists with the empty ``authorizationDomain`` we requested we adopt it and continue into the import;
+    if it cannot be confirmed after ``WORKSPACE_ADOPT_ATTEMPTS`` checks the create genuinely failed and
+    we re-raise. A ``409`` (name already exists) is not a timeout and stays a fail-fast error, as before.
 
     Safety: a workspace our POST just created must carry the empty ``authorizationDomain`` we requested
     (the import applies the real one later). If an adopted workspace already has a non-empty auth domain
@@ -117,34 +117,44 @@ def _create_workspace_resilient(
             type(exc).__name__,
         )
         timeout_exc = exc
+    # Confirm-or-adopt. A 404 means "not visible yet"; a transient Timeout/ConnectionError on the GET is
+    # the same contended condition that timed out the create -- both just retry. Anything else propagates.
     for attempt in range(1, WORKSPACE_ADOPT_ATTEMPTS + 1):
+        ws = None
         try:
-            ws = rawls.get_workspace(namespace, name, fields="workspace.authorizationDomain")
-        except requests.exceptions.HTTPError as get_exc:
-            status = getattr(getattr(get_exc, "response", None), "status_code", None)
-            if status == 404:
-                if attempt < WORKSPACE_ADOPT_ATTEMPTS:
-                    time.sleep(WORKSPACE_ADOPT_POLL_SECONDS)
-                    continue
-                raise RuntimeError(
-                    f"createWorkspace for {namespace}/{name} timed out and the workspace was not "
-                    f"created (still 404 after {WORKSPACE_ADOPT_ATTEMPTS} checks). Re-run to retry."
-                ) from timeout_exc
-            raise
-        domains = workspace_auth_domains(ws)
-        if domains:
-            raise SafetyError(
-                f"createWorkspace for {namespace}/{name} timed out and an existing workspace of that "
-                f"name has a non-empty auth domain {domains}; refusing to adopt it (a just-created "
-                "workspace must have none -- the import applies the auth domain)."
+            ws = rawls.get_workspace(
+                namespace,
+                name,
+                fields="workspace.authorizationDomain",
+                timeout=WORKSPACE_ADOPT_GET_TIMEOUT,
             )
-        logger.info(
-            "createWorkspace timed out but %s/%s exists server-side with an empty auth domain; "
-            "adopting it and continuing to the import.",
-            namespace,
-            name,
-        )
-        return
+        except requests.exceptions.HTTPError as get_exc:
+            if getattr(getattr(get_exc, "response", None), "status_code", None) != 404:
+                raise  # a real error (5xx/403/...) -- do not mask it as "not created"
+        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+            pass  # same load that timed out the create; treat as not-yet-visible and retry
+        if ws is not None:
+            domains = workspace_auth_domains(ws)
+            if domains:
+                raise SafetyError(
+                    f"createWorkspace for {namespace}/{name} timed out and an existing workspace of "
+                    f"that name has a non-empty auth domain {domains}; refusing to adopt it (a just-"
+                    "created workspace must have none -- the import applies the auth domain)."
+                )
+            logger.info(
+                "createWorkspace timed out but %s/%s exists server-side with an empty auth domain; "
+                "adopting it and continuing to the import.",
+                namespace,
+                name,
+            )
+            return
+        if attempt < WORKSPACE_ADOPT_ATTEMPTS:
+            time.sleep(WORKSPACE_ADOPT_POLL_SECONDS)
+    # Never confirmed the workspace -- the create genuinely failed (or Rawls stayed unreachable).
+    raise RuntimeError(
+        f"createWorkspace for {namespace}/{name} timed out and the workspace could not be confirmed "
+        f"created after {WORKSPACE_ADOPT_ATTEMPTS} checks. Re-run to retry."
+    ) from timeout_exc
 
 
 @dataclass(frozen=True)

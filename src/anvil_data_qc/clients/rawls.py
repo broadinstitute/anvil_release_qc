@@ -36,9 +36,17 @@ class RawlsClient(BaseClient):
         }
         return self.request("POST", "/api/workspaces", json_body=body).json()
 
-    def get_workspace(self, namespace: str, name: str, fields: Optional[str] = None) -> dict:
+    def get_workspace(
+        self,
+        namespace: str,
+        name: str,
+        fields: Optional[str] = None,
+        timeout: Optional[float] = None,
+    ) -> dict:
         params = {"fields": fields} if fields else None
-        return self.request("GET", f"/api/workspaces/{namespace}/{name}", params=params).json()
+        return self.request(
+            "GET", f"/api/workspaces/{namespace}/{name}", params=params, timeout=timeout
+        ).json()
 
     def entity_type_metadata(self, namespace: str, name: str) -> dict:
         """GET /api/workspaces/{ns}/{name}/entities.
