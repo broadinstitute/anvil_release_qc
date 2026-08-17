@@ -151,6 +151,21 @@ anvil-data-qc compare \
 Every command exits **`0` on PASS** and **non-zero on failure**, so it gates cleanly in scripts and
 workflows.
 
+### Batch execution across many datasets
+
+A release can carry **hundreds** of datasets. The separate **`qc-batch-runner`** CLI (a "meta-pipeline")
+runs one QC pipeline over a list of snapshots, holding only a few workflows in flight at once — so the
+shared workspace stays responsive — and records each verdict in the data table as usual:
+
+```bash
+qc-batch-runner -p ade_qc --table anvil15_qc -s snapshots.tsv --tier prod --dry-run    # plan only
+qc-batch-runner -p ade_qc --table anvil15_qc -s snapshots.tsv --tier prod              # run (cap 5)
+#   -s: a TSV with a 'snapshot_id' column (e.g. exported from the shared QC workspace's data table)
+```
+
+→ Full detail — inputs, the concurrency + Azul-token pacing, outcome classification, and limitations:
+**[`docs/qc_batch_runner.md`](docs/qc_batch_runner.md)**.
+
 ### Reading the report
 
 ```
@@ -265,6 +280,7 @@ ruff check . && ruff format --check .   # lint + format
 - [`docs/services.md`](docs/services.md) — service registry (repos, OpenAPI specs, per-tier URLs).
 - [`docs/export_import_flow.md`](docs/export_import_flow.md) — the resolved ADE→Terra export/import API flow.
 - [`docs/tdr_export_flow.md`](docs/tdr_export_flow.md) — the resolved TDR-direct→Terra export/import API flow (`tdr-qc`).
+- [`docs/qc_batch_runner.md`](docs/qc_batch_runner.md) — `qc-batch-runner`: batch execution of a QC pipeline over many snapshots.
 - [`docs/comparison.md`](docs/comparison.md) — what the comparisons check, and their limits.
 - [`docs/risk_register.md`](docs/risk_register.md) — tracked project risks (incl. R8, the DMI risk).
 - [`docs/capturing_http_traffic.md`](docs/capturing_http_traffic.md) — capturing & scrubbing HAR flows.
