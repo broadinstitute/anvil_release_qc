@@ -23,6 +23,7 @@ dev = ["pytest>=8", "ruff>=0.5", "pip-tools>=7"]
 
 [project.scripts]
 anvil-data-qc = "anvil_data_qc.cli:app"
+qc-batch-runner = "anvil_data_qc.batch.cli:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]

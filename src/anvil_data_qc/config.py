@@ -47,6 +47,10 @@ class TierConfig(BaseModel):
     # requester-pays access later. This is a real GCP project id (the Terra Workspace Google Project ID,
     # e.g. terra-xxxxxxxx), NOT the Terra billing project. See config.example.yaml.
     billing_google_project_id: str
+    # The existing shared QC workspace (e.g. anvil-data-qc-shared) that qc-batch-runner submits into.
+    # Optional here -- only the batch runner needs it (and it also accepts a CLI override); the ade-qc/
+    # tdr-qc/compare/compare-ingest commands do not use it.
+    qc_workspace_name: Optional[str] = None
     # File holding this tier's Azul access token (gitignored secret); populated by `azul-login`.
     azul_token_file: Optional[str] = None
     # The Azul OAuth client id a token must carry as `azp`. Optional: auto-discovered from Azul's
@@ -70,6 +74,7 @@ class ResolvedTier(BaseModel):
     adc_credentials_file: Optional[str]
     terra_billing_project: str
     billing_google_project_id: str
+    qc_workspace_name: Optional[str] = None
     azul_token_file: Optional[str]
     azul_oauth2_client_id: Optional[str] = None
     authorized_users: list[str] = []
@@ -106,6 +111,7 @@ def resolve_tier(config: AppConfig, tier_name: Optional[str] = None) -> Resolved
         adc_credentials_file=tc.adc_credentials_file,
         terra_billing_project=tc.terra_billing_project,
         billing_google_project_id=tc.billing_google_project_id,
+        qc_workspace_name=tc.qc_workspace_name,
         azul_token_file=tc.azul_token_file,
         azul_oauth2_client_id=tc.azul_oauth2_client_id,
         authorized_users=tc.authorized_users,

@@ -32,6 +32,9 @@ tiers:
     # (Terra workspace dashboard -> Cloud Information -> Google Project ID, e.g. terra-xxxxxxxx), NOT the
     # Terra billing project above. (They coincide for some legacy billing projects, but not in general.)
     billing_google_project_id: terra-xxxxxxxx
+    # Optional: the existing shared QC workspace that `qc-batch-runner` submits into (only that tool uses
+    # it; it also accepts a --qc-workspace-name CLI override). Not needed by ade-qc/tdr-qc/compare.
+    # qc_workspace_name: anvil-data-qc-shared
     # Azul access-token file (gitignored). Populate it with:  anvil-data-qc azul-login --tier dev
     # Azul needs a token issued to its own OAuth client; a plain gcloud ADC token is rejected.
     azul_token_file: secrets/azul-token-dev.txt
@@ -43,4 +46,5 @@ tiers:
     adc_credentials_file: ~/.config/anvil-data-qc/adc-prod.json
     terra_billing_project: your-prod-billing-project
     billing_google_project_id: terra-xxxxxxxx
+    # qc_workspace_name: anvil-data-qc-shared   # for qc-batch-runner (optional; CLI can override)
     azul_token_file: secrets/azul-token-prod.txt
