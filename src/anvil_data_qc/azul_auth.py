@@ -145,6 +145,21 @@ def extract_bearer_token(text: str) -> str:
     )
 
 
+def token_from_file_text(text: str) -> Optional[str]:
+    """Extract the token from Azul-token-file contents: the first non-comment, non-blank line.
+
+    The token files ``azul-login`` writes carry a ``#``-comment header (account/azp/expiry) above the
+    token line, so the whole file text is NOT the token. Returns ``None`` when the text is empty or only
+    comments. Used by both the local file reader and the batch runner's GCS reader, so the two parse
+    token files identically. The token is opaque and not shape-checked here; ``validate_azul_token`` does.
+    """
+    for line in text.splitlines():
+        stripped = line.strip()
+        if stripped and not stripped.startswith("#"):
+            return stripped
+    return None
+
+
 def read_azul_token(tier: ResolvedTier, *, override_path: Optional[str] = None) -> Optional[str]:
     """Read the Azul access token, or ``None`` if none is configured.
 
@@ -162,11 +177,7 @@ def read_azul_token(tier: ResolvedTier, *, override_path: Optional[str] = None) 
         raise FileNotFoundError(
             f"Azul token file not found: {path}. Run `anvil-data-qc azul-login`."
         )
-    for line in path.read_text().splitlines():
-        stripped = line.strip()
-        if stripped and not stripped.startswith("#"):
-            return stripped
-    return None  # present but empty / only comments -> anonymous
+    return token_from_file_text(path.read_text())  # present but empty / only comments -> None
 
 
 def write_azul_token(tier: ResolvedTier, token: str, info: dict) -> Path:

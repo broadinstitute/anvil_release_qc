@@ -29,6 +29,7 @@ from ..azul_auth import (
     MIN_TOKEN_SECONDS_FOR_RUN,
     AzulTokenError,
     expected_client_id,
+    token_from_file_text,
     validate_azul_token,
 )
 from ..config import ResolvedTier
@@ -216,7 +217,11 @@ def check_azul_token(
     gs_uri = attrs.get(AZUL_TOKEN_ATTRIBUTE)
     if not gs_uri:
         return False, f"Workspace Data key {AZUL_TOKEN_ATTRIBUTE!r} is not set."
-    token = read_gcs_text(creds, gs_uri)  # SECRET -- never log `token`
+    # The token file carries a #-comment header above the token line (same format azul-login writes);
+    # extract the token line exactly as the local reader does, so the two parse it identically.
+    token = token_from_file_text(read_gcs_text(creds, gs_uri))  # SECRET -- never log `token`
+    if not token:
+        return False, f"Token file {gs_uri} has no token line (empty or only comments)."
     try:
         info = validate_azul_token(
             token,

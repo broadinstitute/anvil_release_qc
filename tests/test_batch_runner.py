@@ -381,6 +381,37 @@ def test_check_azul_token_ok(monkeypatch):
     assert ok is True and "op@x.org" in detail
 
 
+def test_check_azul_token_strips_comment_header(monkeypatch):
+    # The token file (as azul-login writes it, and as uploaded to GCS) has a #-comment header above the
+    # token line. check_azul_token must validate the token LINE, not the whole file text.
+    file_text = (
+        "# Azul access token for tier 'prod' — SECRET.\n"
+        "# account: sa-user@broadinstitute.org   azp: cid\n"
+        "\n"
+        "the-real-token\n"  # placeholder (not a real ya29.* token) so git-secrets doesn't flag it
+    )
+    client = FakeClient(ws_attrs={"anvil_data_qc_azul_token": "gs://b/tok.txt"})
+    monkeypatch.setattr(runner, "read_gcs_text", lambda creds, uri: file_text)
+    monkeypatch.setattr(runner, "expected_client_id", lambda tier: "cid")
+    seen = {}
+
+    def _capture(token, **kwargs):
+        seen["token"] = token
+        return {"email": "sa-user@broadinstitute.org", "expires_in": 3000}
+
+    monkeypatch.setattr(runner, "validate_azul_token", _capture)
+    ok, detail = check_azul_token(client, object(), _tier(), 2100)
+    assert ok is True
+    assert seen["token"] == "the-real-token"  # bare token line, header stripped
+
+
+def test_check_azul_token_only_comments_not_usable(monkeypatch):
+    client = FakeClient(ws_attrs={"anvil_data_qc_azul_token": "gs://b/tok.txt"})
+    monkeypatch.setattr(runner, "read_gcs_text", lambda creds, uri: "# only a header\n\n")
+    ok, detail = check_azul_token(client, object(), _tier(), 2100)
+    assert ok is False and "no token line" in detail
+
+
 def test_check_azul_token_fails_validation(monkeypatch):
     client = FakeClient(ws_attrs={"anvil_data_qc_azul_token": "gs://b/tok.txt"})
     monkeypatch.setattr(runner, "read_gcs_text", lambda creds, uri: "the-token")
