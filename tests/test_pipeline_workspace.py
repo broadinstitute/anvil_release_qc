@@ -43,7 +43,7 @@ class FakeRawls:
             raise self._create_exc
         return {"name": name}
 
-    def get_workspace(self, namespace, name, fields=None):
+    def get_workspace(self, namespace, name, fields=None, timeout=None):
         self.get_calls += 1
         result = self._get_results.pop(0)
         if isinstance(result, Exception):
@@ -85,7 +85,7 @@ def test_raises_when_workspace_never_created():
         create_exc=requests.exceptions.ReadTimeout("read timed out"),
         get_results=[_http_error(404)] * pipeline.WORKSPACE_ADOPT_ATTEMPTS,
     )
-    with pytest.raises(RuntimeError, match="was not created"):
+    with pytest.raises(RuntimeError, match="could not be confirmed created"):
         _create_workspace_resilient(rawls, "ns", "ws", description="d")
     assert rawls.get_calls == pipeline.WORKSPACE_ADOPT_ATTEMPTS
 
@@ -117,3 +117,21 @@ def test_non_404_get_error_propagates():
     )
     with pytest.raises(requests.exceptions.HTTPError):
         _create_workspace_resilient(rawls, "ns", "ws", description="d")
+
+
+def test_retries_adopt_get_on_transient_error():
+    # A transient error on the adopt GET (same load that timed out the create) is retried, then adopts.
+    rawls = FakeRawls(
+        create_exc=requests.exceptions.ReadTimeout("read timed out"),
+        get_results=[requests.exceptions.ConnectionError("connection reset"), _ws([])],
+    )
+    _create_workspace_resilient(rawls, "ns", "ws", description="d")
+    assert rawls.get_calls == 2
+
+
+def test_non_timeout_create_error_fails_fast():
+    # A create error that is neither a timeout nor a connection error is not caught -> fail fast, no GET.
+    rawls = FakeRawls(create_exc=requests.exceptions.RequestException("unexpected"))
+    with pytest.raises(requests.exceptions.RequestException):
+        _create_workspace_resilient(rawls, "ns", "ws", description="d")
+    assert rawls.get_calls == 0
