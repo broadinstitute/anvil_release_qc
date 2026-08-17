@@ -19,11 +19,13 @@ real (retained) workspace.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Callable, Optional
 from urllib.parse import urlsplit
 
+import requests
 from google.auth.credentials import Credentials
 
 from . import __version__
@@ -37,7 +39,7 @@ from .azul_auth import (
 from .bigquery import check_bigquery_access, resolve_dataset_id, snapshot_data_volume
 from .clients.azul import AzulClient
 from .clients.firecloud import FirecloudClient, import_job_id
-from .clients.rawls import RawlsClient
+from .clients.rawls import RawlsClient, workspace_auth_domains
 from .clients.tdr import (
     TdrClient,
     export_job_id,
@@ -74,6 +76,75 @@ TDR_IMPORT_FILETYPE = "tdrexport"
 # the auth domain, whereas True would sync the snapshot's reader policies (granting access we don't intend).
 # See risk R8 and docs/tdr_export_flow.md.
 TDR_SYNC_PERMISSIONS = False
+
+# Rawls createWorkspace provisions a GCS bucket and is the slow call in the tail; run several-wide by
+# the batch runner it can exceed the default 60s client timeout even while Rawls is healthy. Give it
+# generous headroom, and -- if the POST still times out -- verify whether the workspace was created
+# rather than abandoning an orphaned (import-less) one. See docs/export_import_flow.md and risk R4.
+RAWLS_TIMEOUT = 300  # seconds
+WORKSPACE_ADOPT_ATTEMPTS = (
+    3  # GET retries after a createWorkspace timeout, to let it become visible
+)
+WORKSPACE_ADOPT_POLL_SECONDS = 5.0
+
+
+def _create_workspace_resilient(
+    rawls: RawlsClient, namespace: str, name: str, *, description: str
+) -> None:
+    """Create the destination workspace, tolerating a createWorkspace read-timeout.
+
+    Rawls createWorkspace can be slow under concurrent load, so the POST may time out client-side even
+    though Rawls created the workspace server-side; aborting there leaves an orphaned, import-less
+    workspace (observed under batch QC at ``--max-concurrent 5``). On a timeout/connection error we
+    therefore GET the workspace: if it now exists we adopt it and continue into the import; if it never
+    appears the create genuinely failed and we re-raise. A ``409`` (name already exists) is not a
+    timeout and stays a fail-fast error, exactly as before.
+
+    Safety: a workspace our POST just created must carry the empty ``authorizationDomain`` we requested
+    (the import applies the real one later). If an adopted workspace already has a non-empty auth domain
+    it is not the one we created -- refuse it (``SafetyError``) rather than import into an unexpected
+    target.
+    """
+    try:
+        rawls.create_workspace(namespace, name, description=description)
+        return
+    except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+        logger.warning(
+            "createWorkspace for %s/%s did not return (%s); checking whether it was created "
+            "server-side before giving up...",
+            namespace,
+            name,
+            type(exc).__name__,
+        )
+        timeout_exc = exc
+    for attempt in range(1, WORKSPACE_ADOPT_ATTEMPTS + 1):
+        try:
+            ws = rawls.get_workspace(namespace, name, fields="workspace.authorizationDomain")
+        except requests.exceptions.HTTPError as get_exc:
+            status = getattr(getattr(get_exc, "response", None), "status_code", None)
+            if status == 404:
+                if attempt < WORKSPACE_ADOPT_ATTEMPTS:
+                    time.sleep(WORKSPACE_ADOPT_POLL_SECONDS)
+                    continue
+                raise RuntimeError(
+                    f"createWorkspace for {namespace}/{name} timed out and the workspace was not "
+                    f"created (still 404 after {WORKSPACE_ADOPT_ATTEMPTS} checks). Re-run to retry."
+                ) from timeout_exc
+            raise
+        domains = workspace_auth_domains(ws)
+        if domains:
+            raise SafetyError(
+                f"createWorkspace for {namespace}/{name} timed out and an existing workspace of that "
+                f"name has a non-empty auth domain {domains}; refusing to adopt it (a just-created "
+                "workspace must have none -- the import applies the auth domain)."
+            )
+        logger.info(
+            "createWorkspace timed out but %s/%s exists server-side with an empty auth domain; "
+            "adopting it and continuing to the import.",
+            namespace,
+            name,
+        )
+        return
 
 
 @dataclass(frozen=True)
@@ -176,11 +247,13 @@ def _create_import_and_qc(
 
     # Rawls: create the destination workspace (empty auth domain; the import applies it).
     ws_name = workspace_name(tier.email, name, infix=infix)
-    rawls = RawlsClient(tier.url("rawls"), google_token)
+    rawls = RawlsClient(tier.url("rawls"), google_token, timeout=RAWLS_TIMEOUT)
     logger.info("Creating workspace %s/%s", tier.terra_billing_project, ws_name)
     try:
         with stage_timer("workspace_create", durations):
-            rawls.create_workspace(tier.terra_billing_project, ws_name, description=description)
+            _create_workspace_resilient(
+                rawls, tier.terra_billing_project, ws_name, description=description
+            )
 
         # Firecloud: import and wait for the job to succeed. Dev Terra can be slow (createWorkspace
         # alone took ~20s); give the import submit/polls headroom.

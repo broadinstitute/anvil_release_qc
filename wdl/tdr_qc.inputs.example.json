@@ -4,5 +4,5 @@
   "TdrQc.tier": "prod",
   "TdrQc.dry_run": false,
   "TdrQc.allow_controlled_access": false,
-  "TdrQc.docker": "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.3.2"
+  "TdrQc.docker": "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.3.3"
 }
