@@ -1,0 +1,3 @@
+# Placeholder so git tracks this directory. Batch-run manifests (qc-batch-runner input TSVs) live
+# here, but their contents are gitignored during early testing (see the repo-root .gitignore).
+# Revisit once the manifest patterns stabilize.
