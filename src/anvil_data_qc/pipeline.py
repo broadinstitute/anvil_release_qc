@@ -78,27 +78,35 @@ TDR_IMPORT_FILETYPE = "tdrexport"
 TDR_SYNC_PERMISSIONS = False
 
 # Rawls createWorkspace provisions a GCS bucket and is the slow call in the tail; run several-wide by
-# the batch runner it can exceed the default 60s client timeout even while Rawls is healthy. Give it
-# generous headroom, and -- if the POST still times out -- confirm-or-adopt the workspace (see
-# _create_workspace_resilient) rather than abandoning an orphaned (import-less) one. See risk R4.
+# the batch runner it can be slow enough that either the client read-times-out OR a proxy in front of
+# Rawls returns a 5xx (observed: 502 Bad Gateway at ~120s) even while Rawls is healthy and the workspace
+# was created server-side. Give the client headroom and -- on a timeout OR a 5xx -- confirm-or-adopt the
+# workspace (see _create_workspace_resilient) rather than abandoning an orphaned (import-less) one. R4.
 RAWLS_TIMEOUT = 300  # seconds
-WORKSPACE_ADOPT_ATTEMPTS = 5  # GETs to confirm the workspace after a create timeout
+WORKSPACE_ADOPT_ATTEMPTS = 5  # GETs to confirm the workspace after a failed/uncertain create
 WORKSPACE_ADOPT_POLL_SECONDS = 5.0  # between those GETs
 WORKSPACE_ADOPT_GET_TIMEOUT = 30  # per-GET timeout, so a slow GET is not governed by RAWLS_TIMEOUT
+
+
+def _http_status(exc: requests.exceptions.HTTPError) -> Optional[int]:
+    """The HTTP status code carried by a requests ``HTTPError``, or ``None`` if unavailable."""
+    return getattr(getattr(exc, "response", None), "status_code", None)
 
 
 def _create_workspace_resilient(
     rawls: RawlsClient, namespace: str, name: str, *, description: str
 ) -> None:
-    """Create the destination workspace, tolerating a createWorkspace timeout.
+    """Create the destination workspace, tolerating a slow/uncertain createWorkspace.
 
-    Rawls createWorkspace can be slow under concurrent load, so the POST may time out client-side even
-    though Rawls created the workspace server-side; aborting there leaves an orphaned, import-less
-    workspace (observed under batch QC at ``--max-concurrent 5``). On a timeout/connection error we
-    therefore GET the workspace (retrying a not-yet-visible 404 or a transient GET timeout): if it
+    Rawls createWorkspace can be slow under concurrent load, so the POST may either time out client-side
+    or get a **5xx** from a proxy in front of Rawls (observed: ``502 Bad Gateway`` at ~120s under batch
+    QC at ``--max-concurrent 5``) -- in both cases the workspace is often already created server-side, so
+    aborting leaves an orphaned, import-less workspace. On a timeout/connection error OR a 5xx we
+    therefore GET the workspace (retrying a not-yet-visible 404 or a transient 5xx/GET-timeout): if it
     exists with the empty ``authorizationDomain`` we requested we adopt it and continue into the import;
-    if it cannot be confirmed after ``WORKSPACE_ADOPT_ATTEMPTS`` checks the create genuinely failed and
-    we re-raise. A ``409`` (name already exists) is not a timeout and stays a fail-fast error, as before.
+    if it cannot be confirmed after ``WORKSPACE_ADOPT_ATTEMPTS`` checks the create genuinely failed and we
+    re-raise. A **4xx** (incl. ``409`` name-exists, ``403`` no-access) is a definitive error and stays
+    fail-fast, as before.
 
     Safety: a workspace our POST just created must carry the empty ``authorizationDomain`` we requested
     (the import applies the real one later). If an adopted workspace already has a non-empty auth domain
@@ -109,6 +117,7 @@ def _create_workspace_resilient(
         rawls.create_workspace(namespace, name, description=description)
         return
     except (requests.exceptions.Timeout, requests.exceptions.ConnectionError) as exc:
+        create_exc = exc
         logger.warning(
             "createWorkspace for %s/%s did not return (%s); checking whether it was created "
             "server-side before giving up...",
@@ -116,9 +125,20 @@ def _create_workspace_resilient(
             name,
             type(exc).__name__,
         )
-        timeout_exc = exc
-    # Confirm-or-adopt. A 404 means "not visible yet"; a transient Timeout/ConnectionError on the GET is
-    # the same contended condition that timed out the create -- both just retry. Anything else propagates.
+    except requests.exceptions.HTTPError as exc:
+        status = _http_status(exc)
+        if status is None or status < 500:
+            raise  # 4xx (incl. 409 name-exists / 403 no-access) or unknown -- definitive, fail-fast
+        create_exc = exc
+        logger.warning(
+            "createWorkspace for %s/%s returned %s (gateway/server error -- likely a slow create behind "
+            "a proxy); checking whether it was created server-side before giving up...",
+            namespace,
+            name,
+            status,
+        )
+    # Confirm-or-adopt. A 404 means "not visible yet"; a transient 5xx or Timeout/ConnectionError on the
+    # GET is the same contended condition that failed the create -- all just retry. Definitive 4xx propagates.
     for attempt in range(1, WORKSPACE_ADOPT_ATTEMPTS + 1):
         ws = None
         try:
@@ -129,21 +149,23 @@ def _create_workspace_resilient(
                 timeout=WORKSPACE_ADOPT_GET_TIMEOUT,
             )
         except requests.exceptions.HTTPError as get_exc:
-            if getattr(getattr(get_exc, "response", None), "status_code", None) != 404:
-                raise  # a real error (5xx/403/...) -- do not mask it as "not created"
+            status = _http_status(get_exc)
+            retryable = status == 404 or (status is not None and status >= 500)
+            if not retryable:
+                raise  # a definitive 4xx (403/...) -- do not mask it
         except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
-            pass  # same load that timed out the create; treat as not-yet-visible and retry
+            pass  # same load that failed the create; treat as not-yet-visible and retry
         if ws is not None:
             domains = workspace_auth_domains(ws)
             if domains:
                 raise SafetyError(
-                    f"createWorkspace for {namespace}/{name} timed out and an existing workspace of "
-                    f"that name has a non-empty auth domain {domains}; refusing to adopt it (a just-"
-                    "created workspace must have none -- the import applies the auth domain)."
+                    f"createWorkspace for {namespace}/{name} did not succeed and an existing workspace "
+                    f"of that name has a non-empty auth domain {domains}; refusing to adopt it (a "
+                    "just-created workspace must have none -- the import applies the auth domain)."
                 )
             logger.info(
-                "createWorkspace timed out but %s/%s exists server-side with an empty auth domain; "
-                "adopting it and continuing to the import.",
+                "createWorkspace did not return cleanly but %s/%s exists server-side with an empty auth "
+                "domain; adopting it and continuing to the import.",
                 namespace,
                 name,
             )
@@ -152,9 +174,9 @@ def _create_workspace_resilient(
             time.sleep(WORKSPACE_ADOPT_POLL_SECONDS)
     # Never confirmed the workspace -- the create genuinely failed (or Rawls stayed unreachable).
     raise RuntimeError(
-        f"createWorkspace for {namespace}/{name} timed out and the workspace could not be confirmed "
-        f"created after {WORKSPACE_ADOPT_ATTEMPTS} checks. Re-run to retry."
-    ) from timeout_exc
+        f"createWorkspace for {namespace}/{name} did not succeed and the workspace could not be "
+        f"confirmed created after {WORKSPACE_ADOPT_ATTEMPTS} checks. Re-run to retry."
+    ) from create_exc
 
 
 @dataclass(frozen=True)

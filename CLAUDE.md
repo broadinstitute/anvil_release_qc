@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-`anvil-data-qc` is **built and in production use** (deployed image `:0.3.1`; repo now at `0.3.3`,
+`anvil-data-qc` is **built and in production use** (deployed image `:0.3.1`; repo now at `0.3.4`,
 pending publish). The package
 `src/anvil_data_qc/` provides: `config` (YAML + pydantic, tier resolution), `auth` (ADC per tier +
 Sam-resolved identity guard), `azul_auth` (Azul token capture/validation), `logging_setup` + `redaction`
