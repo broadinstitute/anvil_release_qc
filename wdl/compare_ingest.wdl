@@ -18,7 +18,7 @@ workflow CompareIngest {
         String submitter_workspace_name
         String snapshot_id
         String? tier
-        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.3.3"
+        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.3.4"
     }
 
     call compare_ingest {

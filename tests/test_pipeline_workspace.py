@@ -108,12 +108,11 @@ def test_409_name_exists_fails_fast_not_adopted():
     assert rawls.get_calls == 0
 
 
-def test_non_404_get_error_propagates():
+def test_definitive_4xx_get_error_propagates():
+    # A definitive 4xx (e.g. 403) during the adopt-check propagates -- don't mask it (5xx would retry).
     rawls = FakeRawls(
         create_exc=requests.exceptions.ReadTimeout("read timed out"),
-        get_results=[
-            _http_error(500)
-        ],  # server error during the adopt-check -> propagate, don't mask
+        get_results=[_http_error(403)],
     )
     with pytest.raises(requests.exceptions.HTTPError):
         _create_workspace_resilient(rawls, "ns", "ws", description="d")
@@ -135,3 +134,40 @@ def test_non_timeout_create_error_fails_fast():
     with pytest.raises(requests.exceptions.RequestException):
         _create_workspace_resilient(rawls, "ns", "ws", description="d")
     assert rawls.get_calls == 0
+
+
+# --- gateway/5xx createWorkspace (the 502 seen in prod at cap-5) ---
+
+
+def test_adopts_on_gateway_502():
+    # A 502 Bad Gateway from createWorkspace (workspace created server-side) -> confirm-or-adopt.
+    rawls = FakeRawls(create_exc=_http_error(502), get_results=[_ws([])])
+    _create_workspace_resilient(rawls, "ns", "ws", description="d")  # returns == adopted
+    assert rawls.get_calls == 1
+
+
+def test_gateway_5xx_but_never_created_raises():
+    rawls = FakeRawls(
+        create_exc=_http_error(503),
+        get_results=[_http_error(404)] * pipeline.WORKSPACE_ADOPT_ATTEMPTS,
+    )
+    with pytest.raises(RuntimeError, match="could not be confirmed created"):
+        _create_workspace_resilient(rawls, "ns", "ws", description="d")
+
+
+def test_4xx_create_error_fails_fast_not_adopted():
+    # A definitive 4xx from create (e.g. 403 no-access) is NOT a gateway error -> fail fast, no GET/adopt.
+    rawls = FakeRawls(create_exc=_http_error(403))
+    with pytest.raises(requests.exceptions.HTTPError):
+        _create_workspace_resilient(rawls, "ns", "ws", description="d")
+    assert rawls.get_calls == 0
+
+
+def test_retries_adopt_get_on_transient_5xx():
+    # A transient 5xx on the adopt GET (same gateway pressure) is retried, then adopts.
+    rawls = FakeRawls(
+        create_exc=_http_error(502),
+        get_results=[_http_error(502), _ws([])],
+    )
+    _create_workspace_resilient(rawls, "ns", "ws", description="d")
+    assert rawls.get_calls == 2
