@@ -59,6 +59,13 @@ PIPELINES_NEEDING_AZUL_TOKEN = frozenset({"ade_qc"})
 # Workspace Data key holding the gs:// path to the Azul token file.
 AZUL_TOKEN_ATTRIBUTE = "anvil_data_qc_azul_token"
 
+# Data-table column that marks a row to EXCLUDE from batch runs (e.g. datasets known to exceed the Terra
+# import ceiling). Empty/absent = run normally; any non-empty value = skip, and the value IS the
+# human-readable reason (e.g. "too_large_import_ceiling", "xfail:R4"), surfaced in the log + summary and
+# available for the release QC report. Shared across ade_qc/tdr_qc (both import, so both honor it).
+# Override with --run-skipped.
+SKIP_ATTRIBUTE = "qc_skip"
+
 # Token TTL gate = the pipeline's own requirement + a launch->manifest lag buffer, so the launched
 # workflow still finds >= its own minimum when it reaches the Azul step. Derived from the pipeline
 # constant (MIN_TOKEN_SECONDS_FOR_RUN) so the two can't drift.
@@ -86,6 +93,7 @@ class Outcome(str, Enum):
     INFRA_FAILED = "infra_failed"  # Cromwell workflow Failed (no outputs) -- retry candidate
     ABORTED = "aborted"
     SKIPPED = "skipped"  # already passed (idempotency)
+    EXCLUDED = "excluded"  # marked to skip via the qc_skip column (not a failure); reason is logged
     LAUNCH_ERROR = "launch_error"  # create_submission raised
     INCOMPLETE = "incomplete"  # workflow Succeeded but no exit_code/pass in the row (unexpected)
     WOULD_RUN = "would_run"  # dry-run only
@@ -120,6 +128,7 @@ class BatchResult:
     """Per-run outcome tally + per-snapshot outcomes, and the derived process exit code."""
 
     outcomes: dict = field(default_factory=dict)  # snapshot_id -> Outcome
+    reasons: dict = field(default_factory=dict)  # snapshot_id -> reason string (EXCLUDED rows)
     dry_run: bool = False
 
     def counts(self) -> dict:
@@ -143,7 +152,8 @@ class BatchResult:
             + ", ".join(f"{o.value}={counts[o]}" for o in order if counts.get(o))
         ]
         for sid, o in self.outcomes.items():
-            lines.append(f"  {o.value:<12} {sid}")
+            reason = self.reasons.get(sid)
+            lines.append(f"  {o.value:<12} {sid}" + (f"  ({reason})" if reason else ""))
         return "\n".join(lines)
 
 
@@ -155,6 +165,7 @@ class BatchParams:
     max_concurrent: int = DEFAULT_MAX_CONCURRENT
     dry_run: bool = False
     force: bool = False  # re-run rows that already passed
+    run_skipped: bool = False  # also run rows marked to skip via the qc_skip column
     on_stale_token: str = "auto"  # "auto" (TTY) | "prompt" | "wait"
     token_min_seconds: int = DEFAULT_TOKEN_MIN_SECONDS
     token_poll_seconds: float = DEFAULT_TOKEN_POLL_SECONDS
@@ -203,6 +214,16 @@ def read_row(client: TerraWorkspaceClient, entity_type: str, snapshot_id: str) -
 
 def _row_already_passed(attrs: dict, pipeline: str) -> bool:
     return attrs.get(_passed_attr(pipeline)) is True or attrs.get(_exit_code_attr(pipeline)) == 0
+
+
+def _skip_reason(attrs: dict) -> str:
+    """The row's ``qc_skip`` disposition, or ``""`` when unset (empty/absent ⇒ run normally).
+
+    Any non-empty value marks the row to be EXCLUDED (not submitted); the value itself is the
+    human-readable reason (e.g. ``too_large_import_ceiling``, ``xfail:R4``).
+    """
+    raw = attrs.get(SKIP_ATTRIBUTE)
+    return str(raw).strip() if raw is not None else ""
 
 
 def check_azul_token(
@@ -309,7 +330,12 @@ def _preflight(
     tier: ResolvedTier,
     params: BatchParams,
 ) -> tuple:
-    """Validate config + inputs; return ``(method_ns, method_name, run_list, skip_list)``. Fail-closed."""
+    """Validate config + inputs; return ``(method_ns, method_name, run_list, skip_list, excluded)``.
+
+    ``excluded`` is a list of ``(snapshot_id, reason)`` for rows marked via the ``qc_skip`` column
+    (unless ``--run-skipped``). Fail-closed. The ``qc_skip`` marker is checked before the already-passed
+    idempotency cull, and independently of ``--force``.
+    """
     method_ns, method_name = resolve_method_config(client, params.pipeline, params.entity_type)
     logger.info(
         "Method config resolved: %s/%s (rootEntityType=%s).",
@@ -321,11 +347,15 @@ def _preflight(
     if not params.snapshot_ids:
         raise RunnerFatalError("Empty snapshot_id list — nothing to do.")
 
-    missing, run_list, skip_list = [], [], []
+    missing, run_list, skip_list, excluded = [], [], [], []
     for sid in params.snapshot_ids:
         attrs = read_row(client, params.entity_type, sid)
         if attrs is None:
             missing.append(sid)
+            continue
+        reason = _skip_reason(attrs)
+        if reason and not params.run_skipped:
+            excluded.append((sid, reason))
         elif not params.force and _row_already_passed(attrs, params.pipeline):
             skip_list.append(sid)
         else:
@@ -335,14 +365,18 @@ def _preflight(
             f"{len(missing)} snapshot_id(s) are not rows in table {params.entity_type!r} "
             f"(deleted/replaced?): {missing[:10]}{' …' if len(missing) > 10 else ''}"
         )
+    for sid, reason in excluded:
+        logger.info("Excluding %s (qc_skip=%r).", sid, reason)
     logger.info(
-        "Pre-flight OK: %d total, %d already passed (skip%s), %d to run.",
+        "Pre-flight OK: %d total, %d excluded (qc_skip%s), %d already passed (skip%s), %d to run.",
         len(params.snapshot_ids),
+        len(excluded),
+        " — use --run-skipped to run" if excluded else "",
         len(skip_list),
         " — use --force to re-run" if skip_list and not params.force else "",
         len(run_list),
     )
-    return method_ns, method_name, run_list, skip_list
+    return method_ns, method_name, run_list, skip_list, excluded
 
 
 def _resolve_interactive(on_stale_token: str) -> bool:
@@ -374,10 +408,13 @@ def run_batch(
     needs_token = params.pipeline in PIPELINES_NEEDING_AZUL_TOKEN
     interactive = _resolve_interactive(params.on_stale_token)
 
-    method_ns, method_name, run_list, skip_list = _preflight(client, creds, tier, params)
+    method_ns, method_name, run_list, skip_list, excluded = _preflight(client, creds, tier, params)
     result = BatchResult(dry_run=params.dry_run)
     for sid in skip_list:
         result.outcomes[sid] = Outcome.SKIPPED
+    for sid, reason in excluded:
+        result.outcomes[sid] = Outcome.EXCLUDED
+        result.reasons[sid] = reason
 
     if params.dry_run:
         if needs_token:
@@ -386,11 +423,13 @@ def run_batch(
         for sid in run_list:
             result.outcomes[sid] = Outcome.WOULD_RUN
         logger.info(
-            "DRY RUN: would submit %d %s workflow(s) at max_concurrent=%d; %d skipped (already passed).",
+            "DRY RUN: would submit %d %s workflow(s) at max_concurrent=%d; "
+            "%d skipped (already passed), %d excluded (qc_skip).",
             len(run_list),
             params.pipeline,
             params.max_concurrent,
             len(skip_list),
+            len(excluded),
         )
         return result
 
