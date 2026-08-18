@@ -12,6 +12,7 @@ from anvil_data_qc.batch.runner import (
     BatchParams,
     Outcome,
     RunnerFatalError,
+    _skip_reason,
     batch_drain_policy,
     check_azul_token,
     classify,
@@ -108,7 +109,9 @@ class FakeClient:
         if sid in self._poll_fail_once and sub_id not in self._polled:
             self._polled.add(sub_id)
             raise RuntimeError("simulated poll error")
-        if sub_id in self._live:  # transition to terminal: the workflow "writes" its outputs into the row
+        if (
+            sub_id in self._live
+        ):  # transition to terminal: the workflow "writes" its outputs into the row
             self._live.discard(sub_id)
             if sid in self._post_run:
                 self._entities[sid] = {**self._entities.get(sid, {}), **self._post_run[sid]}
@@ -350,6 +353,80 @@ def test_run_batch_dry_run_submits_nothing(monkeypatch):
     result = _run(client, params, monkeypatch)
     assert client.created == []  # no submissions in dry-run
     assert result.outcomes["a"] is Outcome.WOULD_RUN and result.outcomes["b"] is Outcome.SKIPPED
+    assert result.exit_code == 0
+
+
+# --- qc_skip marker (EXCLUDED) ---
+
+
+def test_skip_reason_helper():
+    assert _skip_reason({"qc_skip": "  too_large  "}) == "too_large"  # trimmed
+    assert _skip_reason({"qc_skip": ""}) == ""  # empty = run normally
+    assert _skip_reason({}) == ""  # absent = run normally
+
+
+def test_run_batch_excludes_marked_rows(monkeypatch):
+    client = FakeClient(
+        method_configs=_cfg(),
+        entities={"a": {"qc_skip": "too_large_import_ceiling"}, "b": {}},
+        post_run={"b": {"tdr_qc_exit_code": 0}},
+    )
+    params = BatchParams(
+        pipeline="tdr_qc", entity_type="anvil15_qc", snapshot_ids=["a", "b"], max_concurrent=5
+    )
+    result = _run(client, params, monkeypatch)
+    assert client.created == ["b"]  # 'a' excluded (marked), only 'b' launched
+    assert result.outcomes["a"] is Outcome.EXCLUDED
+    assert result.reasons["a"] == "too_large_import_ceiling"
+    assert result.outcomes["b"] is Outcome.PASSED
+    assert result.exit_code == 0  # EXCLUDED is not a failure
+    assert "too_large_import_ceiling" in result.render()  # reason surfaced in the summary
+
+
+def test_run_skipped_overrides_marker(monkeypatch):
+    client = FakeClient(
+        method_configs=_cfg(),
+        entities={"a": {"qc_skip": "too_large"}},
+        post_run={"a": {"tdr_qc_exit_code": 0}},
+    )
+    params = BatchParams(
+        pipeline="tdr_qc",
+        entity_type="anvil15_qc",
+        snapshot_ids=["a"],
+        max_concurrent=5,
+        run_skipped=True,
+    )
+    result = _run(client, params, monkeypatch)
+    assert client.created == ["a"]  # --run-skipped ran the marked row
+    assert result.outcomes["a"] is Outcome.PASSED
+
+
+def test_excluded_takes_precedence_over_already_passed(monkeypatch):
+    # A row both marked qc_skip AND already-passed is EXCLUDED (explicit marker wins), not SKIPPED.
+    client = FakeClient(
+        method_configs=_cfg(),
+        entities={"a": {"qc_skip": "xfail:R4", "tdr_qc_exit_code": 0}},
+    )
+    params = BatchParams(
+        pipeline="tdr_qc", entity_type="anvil15_qc", snapshot_ids=["a"], max_concurrent=5
+    )
+    result = _run(client, params, monkeypatch)
+    assert client.created == []
+    assert result.outcomes["a"] is Outcome.EXCLUDED and result.reasons["a"] == "xfail:R4"
+
+
+def test_dry_run_marks_excluded(monkeypatch):
+    client = FakeClient(method_configs=_cfg(), entities={"a": {"qc_skip": "too_large"}, "b": {}})
+    params = BatchParams(
+        pipeline="tdr_qc",
+        entity_type="anvil15_qc",
+        snapshot_ids=["a", "b"],
+        max_concurrent=5,
+        dry_run=True,
+    )
+    result = _run(client, params, monkeypatch)
+    assert client.created == []
+    assert result.outcomes["a"] is Outcome.EXCLUDED and result.outcomes["b"] is Outcome.WOULD_RUN
     assert result.exit_code == 0
 
 

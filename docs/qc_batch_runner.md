@@ -49,6 +49,7 @@ config the QC commands use.
 | `--max-concurrent` | Max workflows in flight (default **5**, hard ceiling **10**). |
 | `--dry-run` | Validate + print the effective plan; create **no** submissions. |
 | `--force` / `--rerun-passed` | Re-run rows that already passed (default: skip them). |
+| `--run-skipped` | Also run rows marked to skip via the `qc_skip` column (default: exclude them). |
 | `--on-stale-token` | ade_qc Azul-token handling when TTL is low: `auto` (TTY→prompt, else wait) \| `prompt` \| `wait`. |
 | `-c, --config` | Path to the YAML config (default `config/config.yaml`). |
 
@@ -65,8 +66,11 @@ Cheap, reuse-only checks; if any fails the batch stops **before** a single workf
   to the wrong table).
 - **Row existence** — every `snapshot_id` in the TSV is an actual row in the table; any missing id is
   fatal (a deleted/replaced snapshot is a mistake worth stopping for).
+- **Skip-marker cull (`qc_skip`)** — rows with a non-empty `qc_skip` column are **excluded** (not
+  submitted) unless `--run-skipped`, each logged with its reason (see below). Checked *before* the
+  idempotency cull and independently of `--force`.
 - **Idempotency cull** — rows already `<prefix>_qc_passed == true` (or `<prefix>_qc_exit_code == 0`) are
-  logged and **skipped** unless `--force`; an up-front "N skip / M run" summary is emitted.
+  logged and **skipped** unless `--force`; an up-front "N excluded / N skipped / M run" summary is emitted.
 - For `ade_qc`, a **token dry-check** (see below) is logged but not enforced in `--dry-run`.
 
 It deliberately does **not** re-run the pipeline's full `--verify-auth` — from the runner's local
@@ -126,7 +130,26 @@ lost, token wait exceeded, bad input/config) stop the run. `Done` ≠ passed —
 | `launch_error` | `create_submission` raised (batch continued) | retry |
 | `incomplete` | workflow `Succeeded` but no verdict in the row (unexpected) | investigate |
 | `skipped` | already passed (idempotency) | — (use `--force`) |
+| `excluded` | marked via the `qc_skip` column (reason shown) | — (use `--run-skipped`) |
 | `would_run` | `--dry-run` only | — |
+
+### Skipping known-bad datasets (`qc_skip`)
+
+Some datasets are known ahead of time to be un-runnable through the import-based QC — e.g. those that
+exceed the [Terra import ceiling](risk_register.md) (R4) and would run for hours before failing. Rather
+than hand-curating the input TSV, mark them **in the data table** (the source of truth) with a **`qc_skip`
+column**:
+
+- **Empty / absent** → run normally.
+- **Non-empty** → the row is **excluded** (not submitted), and the value *is* the human-readable reason,
+  e.g. `too_large_import_ceiling` or `xfail:R4`. One column, self-documenting, sortable/filterable in the
+  Terra UI, and durable across runs.
+
+The runner logs each exclusion with its reason and reports them on their own summary line; `excluded` is
+**not** a failure (it does not affect the exit code). `--run-skipped` overrides the marker for a run —
+kept **independent of `--force`**, so re-running already-passed rows never accidentally launches the
+known-bad giants. The `qc_skip` reason is also the natural input to a per-release **QC report** ("what was
+not QC'd, and why").
 
 ## Submission API contract
 

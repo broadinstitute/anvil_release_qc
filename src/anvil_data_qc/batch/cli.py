@@ -2,7 +2,8 @@
 list via the Terra submissions API, capped at a small concurrency.
 
     qc-batch-runner --tier prod --table anvil15_qc --pipeline ade_qc --snapshots priorityA.tsv \
-        [--max-concurrent 5] [--dry-run] [--force] [--on-stale-token auto|prompt|wait] \
+        [--max-concurrent 5] [--dry-run] [--force] [--run-skipped] \
+        [--on-stale-token auto|prompt|wait] \
         [--qc-workspace-name anvil-data-qc-shared] [--config config/config.yaml]
 
 Reuses the repo's config, identity guard, Azul-token validation, logging, and redaction. The per-dataset
@@ -92,6 +93,11 @@ def main(
         "--rerun-passed",
         help="Re-run rows that already passed (default: skip them).",
     ),
+    run_skipped: bool = typer.Option(
+        False,
+        "--run-skipped",
+        help="Also run rows marked to skip (non-empty 'qc_skip' column); default: exclude them.",
+    ),
     on_stale_token: str = typer.Option(
         "auto",
         "--on-stale-token",
@@ -126,6 +132,7 @@ def main(
         max_concurrent=max_concurrent,
         dry_run=dry_run,
         force=force,
+        run_skipped=run_skipped,
         on_stale_token=on_stale_token,
         log_file=str(log_file),
     )
@@ -147,6 +154,7 @@ def main(
             max_concurrent=max_concurrent,
             dry_run=dry_run,
             force=force,
+            run_skipped=run_skipped,
             on_stale_token=on_stale_token,
         )
         result = run_batch(client=client, creds=creds, tier=resolved, params=params)
