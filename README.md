@@ -104,6 +104,9 @@ Open-access datasets need nothing more. Controlled-access is enabled with the de
 (`anvil-data-qc azul-login --tier <tier>`), while `tdr-qc` needs none — your own Terra account must
 already grant access to the controlled data.
 
+> **New operator?** See [`docs/operator_onboarding.md`](docs/operator_onboarding.md) for the full
+> credentials + access setup (and `--verify-auth` to confirm it before your first run).
+
 ### The common commands
 
 **Ingestion QC — did the submitter's data make it into TDR?** (the most common day-to-day check)
@@ -276,6 +279,7 @@ ruff check . && ruff format --check .   # lint + format
 
 ## Documentation
 
+- [`docs/operator_onboarding.md`](docs/operator_onboarding.md) — **new operator? start here** — credentials, the two kinds of access, and verifying your setup.
 - [`CLAUDE.md`](CLAUDE.md) — architecture, design decisions, conventions.
 - [`docs/services.md`](docs/services.md) — service registry (repos, OpenAPI specs, per-tier URLs).
 - [`docs/export_import_flow.md`](docs/export_import_flow.md) — the resolved ADE→Terra export/import API flow.
