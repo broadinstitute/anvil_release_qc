@@ -387,6 +387,41 @@ def _resolve_interactive(on_stale_token: str) -> bool:
     return sys.stdin.isatty()  # "auto"
 
 
+def run_verify_auth(
+    *,
+    client: TerraWorkspaceClient,
+    creds: Credentials,
+    tier: ResolvedTier,
+    pipeline: str,
+    entity_type: str,
+    identity: str,
+    token_min_seconds: int = DEFAULT_TOKEN_MIN_SECONDS,
+) -> str:
+    """Side-effect-free auth/access preflight (no submissions). Mirrors the pipelines' ``--verify-auth``.
+
+    Assumes the caller has already run the identity guard (``assert_tier_identity``) and passes the
+    resolved Terra user as ``identity``. Then confirms, without side effects: the shared workspace + the
+    pipeline's method config are reachable and the config's ``rootEntityType`` matches ``entity_type``;
+    and -- for ``ade_qc`` -- that a usable Azul token is present (``check_azul_token``). Returns a one-line
+    human summary; raises ``RunnerFatalError`` (or ``IdentityMismatchError`` upstream) on any problem.
+    """
+    method_ns, method_name = resolve_method_config(client, pipeline, entity_type)
+    if pipeline in PIPELINES_NEEDING_AZUL_TOKEN:
+        ok, detail = check_azul_token(client, creds, tier, token_min_seconds)
+        if not ok:
+            raise RunnerFatalError(f"Azul token not usable for {pipeline}: {detail}")
+        token_line = f"Azul token OK ({detail})"
+    else:
+        token_line = "Azul token not required (tdr_qc)"
+    summary = (
+        f"AUTH VERIFIED — tier {tier.name}: operating as {identity}; "
+        f"workspace {client.namespace}/{client.name} reachable; "
+        f"method config {method_ns}/{method_name} (rootEntityType={entity_type}); {token_line}"
+    )
+    logger.info("✓ %s", summary)
+    return summary
+
+
 def run_batch(
     *,
     client: TerraWorkspaceClient,
