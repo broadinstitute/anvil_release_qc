@@ -6,7 +6,7 @@ import pytest
 import requests
 
 from anvil_data_qc.batch import runner
-from anvil_data_qc.batch.cli import _read_snapshot_ids
+from anvil_data_qc.batch.cli import _read_snapshot_ids, _terra_http_error_message
 from anvil_data_qc.batch.runner import (
     MAX_CONCURRENT_CEILING,
     BatchParams,
@@ -19,6 +19,7 @@ from anvil_data_qc.batch.runner import (
     ensure_token_available,
     resolve_method_config,
     run_batch,
+    run_verify_auth,
     sliding_window_policy,
 )
 from anvil_data_qc.config import ResolvedTier
@@ -527,3 +528,78 @@ def test_ensure_token_prompt_then_ok(monkeypatch):
     ensure_token_available(
         client, object(), _tier(), params, interactive=True
     )  # returns without raising
+
+
+# --- verify-auth preflight ---
+
+
+def test_verify_auth_ade_ok(monkeypatch):
+    client = FakeClient(method_configs=_cfg("anvil-data-qc-ade-qc"))
+    monkeypatch.setattr(
+        runner, "check_azul_token", lambda *a, **k: (True, "account op@x, expires in 3000s")
+    )
+    summary = run_verify_auth(
+        client=client,
+        creds=object(),
+        tier=_tier(),
+        pipeline="ade_qc",
+        entity_type="anvil15_qc",
+        identity="op@broadinstitute.org",
+    )
+    assert (
+        "AUTH VERIFIED" in summary
+        and "op@broadinstitute.org" in summary
+        and "Azul token OK" in summary
+    )
+
+
+def test_verify_auth_ade_token_bad(monkeypatch):
+    client = FakeClient(method_configs=_cfg("anvil-data-qc-ade-qc"))
+    monkeypatch.setattr(
+        runner, "check_azul_token", lambda *a, **k: (False, "expires in 100s (need > 2100s)")
+    )
+    with pytest.raises(RunnerFatalError, match="Azul token not usable"):
+        run_verify_auth(
+            client=client,
+            creds=object(),
+            tier=_tier(),
+            pipeline="ade_qc",
+            entity_type="anvil15_qc",
+            identity="op@x",
+        )
+
+
+def test_verify_auth_tdr_skips_token():
+    client = FakeClient(method_configs=_cfg("anvil-data-qc-tdr-qc"))
+    summary = run_verify_auth(
+        client=client,
+        creds=object(),
+        tier=_tier(),
+        pipeline="tdr_qc",
+        entity_type="anvil15_qc",
+        identity="op@x",
+    )
+    assert "not required (tdr_qc)" in summary
+
+
+def test_verify_auth_method_config_not_found():
+    with pytest.raises(RunnerFatalError, match="not found"):
+        run_verify_auth(
+            client=FakeClient(method_configs=[]),
+            creds=object(),
+            tier=_tier(),
+            pipeline="ade_qc",
+            entity_type="anvil15_qc",
+            identity="op@x",
+        )
+
+
+def test_terra_http_error_message():
+    def _err(status):
+        e = requests.exceptions.HTTPError(f"HTTP {status}")
+        e.response = types.SimpleNamespace(status_code=status)
+        return e
+
+    assert "Access denied (HTTP 403)" in _terra_http_error_message(_err(403), "prod", "ns/ws")
+    assert "not found (HTTP 404)" in _terra_http_error_message(_err(404), "prod", "ns/ws")
+    assert "HTTP 500" in _terra_http_error_message(_err(500), "prod", "ns/ws")

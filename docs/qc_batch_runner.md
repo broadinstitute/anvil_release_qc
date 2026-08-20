@@ -43,11 +43,12 @@ config the QC commands use.
 |---|---|
 | `-p, --pipeline` | `ade_qc` or `tdr_qc` (v1). |
 | `--table` | Root entity type = the data-table name the method config is bound to (e.g. `anvil15_qc`). |
-| `-s, --snapshots` | A **TSV with a `snapshot_id` column** — the rows to process (order-preserving, de-duplicated). Other columns are ignored, so you can export a data-table selection directly. |
+| `-s, --snapshots` | A **TSV with a `snapshot_id` column** — the rows to process (order-preserving, de-duplicated). Other columns are ignored, so you can export a data-table selection directly. **Required unless `--verify-auth`.** |
 | `-t, --tier` | `dev` \| `prod` (defaults to the config's `default_tier`). |
 | `--qc-workspace-name` | Override the config's `qc_workspace_name`. |
 | `--max-concurrent` | Max workflows in flight (default **5**, hard ceiling **10**). |
 | `--dry-run` | Validate + print the effective plan; create **no** submissions. |
+| `--verify-auth` | Auth/access preflight only: check identity, workspace + method-config access, and (ade_qc) the Azul token, then exit — **no** submissions, `--snapshots` not required. |
 | `--force` / `--rerun-passed` | Re-run rows that already passed (default: skip them). |
 | `--run-skipped` | Also run rows marked to skip via the `qc_skip` column (default: exclude them). |
 | `--on-stale-token` | ade_qc Azul-token handling when TTL is low: `auto` (TTY→prompt, else wait) \| `prompt` \| `wait`. |
@@ -73,9 +74,22 @@ Cheap, reuse-only checks; if any fails the batch stops **before** a single workf
   logged and **skipped** unless `--force`; an up-front "N excluded / N skipped / M run" summary is emitted.
 - For `ade_qc`, a **token dry-check** (see below) is logged but not enforced in `--dry-run`.
 
-It deliberately does **not** re-run the pipeline's full `--verify-auth` — from the runner's local
-identity that isn't representative of the pet-SA TDR/BigQuery/export path the workflow actually uses.
-That path is validated instead by the **cap-1 canary** (below).
+**Standalone auth preflight — `--verify-auth`.** For a fast, side-effect-free check *before* preparing a
+run, `qc-batch-runner --pipeline … --table … --verify-auth` (no `--snapshots` needed) runs just the
+auth/access checks — identity guard → workspace + method-config access → (ade_qc) Azul-token validity —
+prints a `✓ AUTH VERIFIED — operating as <you>; workspace … reachable; …; Azul token …` line, and exits
+**0** before any submission. It mirrors the pipelines' `--verify-auth` and is the quickest way to confirm
+"am I signed in as the right account, and is my Azul token usable?" before committing to a long batch —
+especially handy when you've been switching Google accounts. Note this validates the **runner's** local
+auth surface; the pet-SA TDR/BigQuery/export path the *workflows* use is still validated by the **cap-1
+canary** (below), not here.
+
+**Credential & access errors are friendly, not tracebacks.** Incomplete setup exits **2** with a clear
+message instead of a raw stack trace: missing/expired ADC credentials → "re-run `gcloud auth
+application-default login` … and re-save `<adc_credentials_file>`"; and a Terra **403/404** (e.g. an
+authorized account that hasn't been granted access to the shared workspace — common when onboarding a new
+operator) → "Access denied to workspace `<ns>/<name>` … ask the workspace owner to grant access." Pair with
+`--verify-auth` for a fast setup check before a new operator's first run.
 
 ### 2. Control loop (concurrency-capped)
 
