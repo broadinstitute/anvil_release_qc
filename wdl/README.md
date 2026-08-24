@@ -181,6 +181,20 @@ date/time type, so they're strings — chosen to **sort chronologically**, be ti
 for operators across time zones, and contain no spaces (so a TSV export stays unquoted in Excel). Useful
 for QC management — e.g. sorting by run time, or spotting rows last QC'd **before** a UCSC reindex/fix.
 
+**`ade-qc` / `tdr-qc` only** — the created **Analysis Workspace** the flow exports/imports into (empty if
+no workspace was created, e.g. a dry run or a pre-import failure; **present even on a failed import**,
+since the workspace is retained), as data-table columns:
+
+| Output | Meaning |
+|---|---|
+| `workspace_namespace` (String) | the workspace's Terra billing project (= `terra_billing_project`) |
+| `workspace_name` (String) | the workspace name (`<user>_<flow>_<snapshot>_<YYYYMMDDHHMM>`) |
+
+Having these in the table lets you **run `compare` against a workspace whose import outran the wait**
+(or as `compare` gains finer-grained tiers), **discover another operator's run** (the workspace is
+owner-only by default — see who created it, then request access for manual/automated follow-up), and
+**bulk-clean-up** retained workspaces (see R4).
+
 The task **always succeeds** so the report is always produced (a *failed* Cromwell task delocalizes no
 outputs). Identify failures by the `qc_passed` / `qc_exit_code` columns — no need to open each report.
 (QC comparison time is intentionally *not* reported — it's quick and not a user-experienced delay.)
@@ -197,10 +211,10 @@ The production `*.outputs.json` route **both** `ade-qc` and `tdr-qc` back to tha
 **prefixing** each flow's outputs so they coexist without collision:
 
 - `ade-qc` outputs → **`ade_*`** columns (`ade_qc_passed`, `ade_qc_exit_code`, `ade_qc_report`,
-  `ade_detailed_log`, `ade_run_began`, `ade_run_ended`, `ade_manifest_minutes`,
-  `ade_workspace_create_minutes`, `ade_import_minutes`).
+  `ade_detailed_log`, `ade_run_began`, `ade_run_ended`, `ade_workspace_namespace`, `ade_workspace_name`,
+  `ade_manifest_minutes`, `ade_workspace_create_minutes`, `ade_import_minutes`).
 - `tdr-qc` outputs → **`tdr_*`** columns (`tdr_qc_passed`, …, `tdr_run_began`, `tdr_run_ended`,
-  `tdr_export_minutes`, `tdr_import_minutes`).
+  `tdr_workspace_namespace`, `tdr_workspace_name`, `tdr_export_minutes`, `tdr_import_minutes`).
 - the three data-volume counts (`total_table_count` / `total_row_count` / `total_value_count`) are left
   **unprefixed and shared**: both flows compute them from the *same* TDR snapshot, so they coincide — and
   the shared column doubles as a **cross-flow consistency check** (a divergence would itself be a signal).

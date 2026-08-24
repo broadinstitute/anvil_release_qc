@@ -41,6 +41,8 @@ workflow TdrQc {
         Boolean qc_passed = tdr_qc.qc_passed
         String run_began = tdr_qc.run_began
         String run_ended = tdr_qc.run_ended
+        String workspace_namespace = tdr_qc.workspace_namespace
+        String workspace_name = tdr_qc.workspace_name
         Float tdr_export_minutes = tdr_qc.tdr_export_minutes
         Float workspace_create_minutes = tdr_qc.workspace_create_minutes
         Float import_minutes = tdr_qc.import_minutes
@@ -119,6 +121,14 @@ task tdr_qc {
             [ -s "${metric}.txt" ] || echo 0 > "${metric}.txt"
         done
 
+        # Created Analysis Workspace (namespace/name), logged by the pipeline BEFORE the import so it is
+        # present even if the import failed (the retained workspace exists) -- for a later `compare`,
+        # cross-operator access, or cleanup. Empty if no workspace was created (dry run / pre-import
+        # failure). namespace + name are [A-Za-z0-9_-] (no spaces/slashes), so the single '/' splits them.
+        WS="$(grep -F 'QC workspace:' detailed_log.txt | tail -1 | sed -E 's#.*QC workspace: ##' || true)"
+        printf '%s' "${WS%%/*}" > workspace_namespace.txt
+        printf '%s' "${WS#*/}"  > workspace_name.txt
+
         cat detailed_log.txt  # surface the full log in the Cromwell task stdout
     >>>
 
@@ -137,6 +147,10 @@ task tdr_qc {
         # Run start/end wall-clock (UTC, ISO 8601, second granularity), captured around the CLI call.
         String run_began = read_string("run_began.txt")
         String run_ended = read_string("run_ended.txt")
+        # The created Analysis Workspace (namespace/name); empty if none was created (dry run /
+        # pre-import failure). Present even on a failed import (the retained workspace exists).
+        String workspace_namespace = read_string("workspace_namespace.txt")
+        String workspace_name = read_string("workspace_name.txt")
         # Per-stage durations in minutes (the user-experienced delays); 0 if the stage did not run.
         Float tdr_export_minutes = read_float("tdr_export_minutes.txt")
         Float workspace_create_minutes = read_float("workspace_create_minutes.txt")

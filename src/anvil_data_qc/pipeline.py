@@ -288,6 +288,12 @@ def _create_import_and_qc(
             _create_workspace_resilient(
                 rawls, tier.terra_billing_project, ws_name, description=description
             )
+        # Stable, greppable marker for the created workspace, logged BEFORE the import so it is present
+        # even if the import later fails (the retained workspace still exists). The WDL parses it into the
+        # workspace_namespace/workspace_name data-table columns -- for a later `compare`, cross-operator
+        # discovery/access of another operator's run, or (bulk) cleanup. namespace + name are both from
+        # [A-Za-z0-9_-] (no spaces/slashes), so the single '/' splits them cleanly.
+        logger.info("QC workspace: %s/%s", tier.terra_billing_project, ws_name)
 
         # Firecloud: import and wait for the job to succeed. Dev Terra can be slow (createWorkspace
         # alone took ~20s); give the import submit/polls headroom.
