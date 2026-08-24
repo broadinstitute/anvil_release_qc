@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-`anvil-data-qc` is **built and in production use** (deployed image `:0.3.1`; repo now at `0.3.4`,
+`anvil-data-qc` is **built and in production use** (deployed image `:0.3.4`; repo now at `0.3.5`,
 pending publish). The package
 `src/anvil_data_qc/` provides: `config` (YAML + pydantic, tier resolution), `auth` (ADC per tier +
 Sam-resolved identity guard), `azul_auth` (Azul token capture/validation), `logging_setup` + `redaction`
@@ -36,9 +36,19 @@ table comparison (T1–T2: table parity, row counts, column-count sanity) + auth
   `safety.py` and risk **R8**; keep the opt-in **default-off** and do not weaken layers 2–4.
 - **`--verify-auth`** — a fast, side-effect-free preflight (identity guard → Azul token (ade) →
   retrieveSnapshot → consent gate → exit **before** any export/signed URL).
+- **Azul reindexing preflight** (`ade-qc`; v0.3.5) — before the export, `azul_auth.assert_azul_not_reindexing`
+  reads Azul's `/health/progress`; any non-zero unindexed backlog (a catalog (re)index in progress) **fails
+  fast** (exit 2, retryable) rather than exporting an empty/incomplete manifest and producing a false QC
+  verdict. Strict-zero; fail-open on a health-endpoint blip. Also in `qc-batch-runner --verify-auth`. See
+  [`docs/qc_batch_runner.md`](docs/qc_batch_runner.md) → *Azul reindexing*.
 - **Data-volume metrics** (`total_table_count` / `total_row_count` / `total_value_count`) and **per-stage
   durations** (minutes) — computed early and surfaced even on a failed/timed-out import, and exposed as
   WDL outputs; instruments for the Terra Data Table capacity question (below).
+- **Run metadata as WDL outputs / data-table columns** (v0.3.5) — **run timestamps** (`run_began` /
+  `run_ended`, UTC ISO-8601 to the second, all four workflows) and, for `ade-qc`/`tdr-qc`, the **created
+  workspace** (`workspace_namespace` / `workspace_name`) — so results sort by run time, correlate to a
+  UCSC reindex/fix, and the retained test workspace is findable for a later `compare` / cross-operator
+  access / cleanup.
 
 For deployment, a code-only **Docker image** (`Dockerfile`) plus four **womtool-validated WDL** wrappers
 (`wdl/{ade_qc,tdr_qc,compare,compare_ingest}.wdl`) run the same CLI non-interactively in Terra. Each WDL
@@ -66,6 +76,10 @@ has two committed config sets — a safe `*.inputs.example.json` and the portabl
   [`docs/comparison.md`](docs/comparison.md).
 - ⏭️ **Deferred QC depth** (see [`docs/comparison.md`](docs/comparison.md)): full column-name
   comparison, T3 id-set parity, T4 cell-value comparison.
+- 🆕 **v0.3.5 (this release, pending publish):** the Azul **reindexing preflight** (guards `ade-qc`
+  against QC'ing an empty/incomplete manifest during a UCSC catalog reindex); **run timestamps** and the
+  **created-workspace** namespace/name as WDL outputs / data-table columns (both described above). Bundled
+  into one image publish.
 
 Environment: Python **3.13.14** (pyenv; pinned in `.python-version`), local `.venv`, deps from
 `pyproject.toml` with pinned `requirements.txt` / `requirements-dev.txt` (pip-tools). See the README
