@@ -4,7 +4,10 @@ import pytest
 
 from anvil_data_qc import azul_auth
 from anvil_data_qc.azul_auth import (
+    AzulReindexingError,
     AzulTokenError,
+    assert_azul_not_reindexing,
+    azul_indexing_backlog,
     discover_azul_client_id,
     expected_client_id,
     extract_bearer_token,
@@ -33,13 +36,17 @@ def _tier(token_file=None, client_id=None):
 
 
 class _FakeResp:
-    def __init__(self, text="", status=200):
+    def __init__(self, text="", status=200, json_data=None):
         self.text = text
         self.status_code = status
+        self._json = json_data
 
     def raise_for_status(self):
         if self.status_code >= 400:
             raise AssertionError("http error")
+
+    def json(self):
+        return self._json
 
 
 def _info(azp=_CLIENT_ID, email=_EMAIL, expires_in="3600"):
@@ -76,6 +83,54 @@ def test_discover_client_id_not_found(monkeypatch):
     monkeypatch.setattr(azul_auth.requests, "get", lambda *a, **k: _FakeResp("no id here"))
     with pytest.raises(AzulTokenError):
         discover_azul_client_id("https://azul.example/")
+
+
+# --- reindexing preflight (/health/progress) ---
+
+
+def _progress(up=True, bundles=0, documents=0):
+    return {
+        "up": up,
+        "progress": {"up": up, "unindexed_bundles": bundles, "unindexed_documents": documents},
+    }
+
+
+def test_indexing_backlog_parses(monkeypatch):
+    monkeypatch.setattr(
+        azul_auth.requests,
+        "get",
+        lambda *a, **k: _FakeResp(json_data=_progress(bundles=5, documents=3)),
+    )
+    assert azul_indexing_backlog("https://azul.example/") == (True, 5, 3)
+
+
+def test_not_reindexing_when_idle(monkeypatch):
+    monkeypatch.setattr(azul_auth.requests, "get", lambda *a, **k: _FakeResp(json_data=_progress()))
+    assert assert_azul_not_reindexing("https://azul.example/") is None  # does not raise
+
+
+def test_reindexing_blocks_on_bundles(monkeypatch):
+    monkeypatch.setattr(
+        azul_auth.requests, "get", lambda *a, **k: _FakeResp(json_data=_progress(bundles=507118))
+    )
+    with pytest.raises(AzulReindexingError, match="indexing"):
+        assert_azul_not_reindexing("https://azul.example/")
+
+
+def test_reindexing_blocks_on_documents(monkeypatch):
+    monkeypatch.setattr(
+        azul_auth.requests, "get", lambda *a, **k: _FakeResp(json_data=_progress(documents=42))
+    )
+    with pytest.raises(AzulReindexingError):
+        assert_azul_not_reindexing("https://azul.example/")
+
+
+def test_reindexing_blocks_when_not_up(monkeypatch):
+    monkeypatch.setattr(
+        azul_auth.requests, "get", lambda *a, **k: _FakeResp(json_data=_progress(up=False))
+    )
+    with pytest.raises(AzulReindexingError, match="up=false"):
+        assert_azul_not_reindexing("https://azul.example/")
 
 
 # --- validate_azul_token (tokeninfo mocked) ---

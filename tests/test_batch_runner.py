@@ -5,6 +5,7 @@ import types
 import pytest
 import requests
 
+from anvil_data_qc.azul_auth import AzulReindexingError
 from anvil_data_qc.batch import runner
 from anvil_data_qc.batch.cli import _read_snapshot_ids, _terra_http_error_message
 from anvil_data_qc.batch.runner import (
@@ -34,7 +35,7 @@ def _tier():
         billing_google_project_id="terra-xxxx",
         qc_workspace_name="anvil-data-qc-shared",
         azul_token_file=None,
-        service_urls={"firecloud": "https://fc.example/"},
+        service_urls={"firecloud": "https://fc.example/", "azul": "https://azul.example/"},
     )
 
 
@@ -538,6 +539,7 @@ def test_verify_auth_ade_ok(monkeypatch):
     monkeypatch.setattr(
         runner, "check_azul_token", lambda *a, **k: (True, "account op@x, expires in 3000s")
     )
+    monkeypatch.setattr(runner, "assert_azul_not_reindexing", lambda *a, **k: None)  # idle
     summary = run_verify_auth(
         client=client,
         creds=object(),
@@ -550,7 +552,50 @@ def test_verify_auth_ade_ok(monkeypatch):
         "AUTH VERIFIED" in summary
         and "op@broadinstitute.org" in summary
         and "Azul token OK" in summary
+        and "Azul indexing idle" in summary
     )
+
+
+def test_verify_auth_ade_reindexing_blocks(monkeypatch):
+    client = FakeClient(method_configs=_cfg("anvil-data-qc-ade-qc"))
+    monkeypatch.setattr(
+        runner, "check_azul_token", lambda *a, **k: (True, "account op@x, expires in 3000s")
+    )
+
+    def _reindexing(*_a, **_k):
+        raise AzulReindexingError("Azul is (re)indexing (unindexed_bundles=5)")
+
+    monkeypatch.setattr(runner, "assert_azul_not_reindexing", _reindexing)
+    with pytest.raises(RunnerFatalError, match="indexing"):
+        run_verify_auth(
+            client=client,
+            creds=object(),
+            tier=_tier(),
+            pipeline="ade_qc",
+            entity_type="anvil15_qc",
+            identity="op@x",
+        )
+
+
+def test_verify_auth_ade_reindex_check_error_fails_open(monkeypatch):
+    client = FakeClient(method_configs=_cfg("anvil-data-qc-ade-qc"))
+    monkeypatch.setattr(
+        runner, "check_azul_token", lambda *a, **k: (True, "account op@x, expires in 3000s")
+    )
+
+    def _blip(*_a, **_k):
+        raise requests.ConnectionError("health endpoint unreachable")
+
+    monkeypatch.setattr(runner, "assert_azul_not_reindexing", _blip)
+    summary = run_verify_auth(  # a health-endpoint blip must NOT block the preflight
+        client=client,
+        creds=object(),
+        tier=_tier(),
+        pipeline="ade_qc",
+        entity_type="anvil15_qc",
+        identity="op@x",
+    )
+    assert "AUTH VERIFIED" in summary and "Azul indexing status unknown" in summary
 
 
 def test_verify_auth_ade_token_bad(monkeypatch):

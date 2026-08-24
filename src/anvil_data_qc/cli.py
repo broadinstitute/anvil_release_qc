@@ -19,6 +19,7 @@ import typer
 
 from .auth import assert_tier_identity, bearer_token, credentials_for_tier
 from .azul_auth import (
+    AzulReindexingError,
     AzulTokenError,
     expected_client_id,
     extract_bearer_token,
@@ -98,9 +99,10 @@ def ade_qc(
             azul_token_file=azul_token_file,
             verify_auth=verify_auth,
         )
-    except (SafetyError, BigQueryAccessError) as exc:
-        # Safety gate (consent / signed-URL hand-off) or BigQuery preflight failure -- see safety.py /
-        # bigquery.check_bigquery_access. Clean message, no traceback.
+    except (SafetyError, BigQueryAccessError, AzulReindexingError) as exc:
+        # Safety gate (consent / signed-URL hand-off), BigQuery preflight, or Azul-reindexing preflight
+        # failure -- see safety.py / bigquery.check_bigquery_access / azul_auth.assert_azul_not_reindexing.
+        # All are "cannot run now" aborts (exit 2, retryable), not a QC verdict. Clean message, no traceback.
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from exc
     if (

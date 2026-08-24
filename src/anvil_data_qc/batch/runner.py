@@ -27,7 +27,9 @@ from google.auth.credentials import Credentials
 
 from ..azul_auth import (
     MIN_TOKEN_SECONDS_FOR_RUN,
+    AzulReindexingError,
     AzulTokenError,
+    assert_azul_not_reindexing,
     expected_client_id,
     token_from_file_text,
     validate_azul_token,
@@ -411,12 +413,26 @@ def run_verify_auth(
         if not ok:
             raise RunnerFatalError(f"Azul token not usable for {pipeline}: {detail}")
         token_line = f"Azul token OK ({detail})"
+        # Azul reindexing preflight (ade_qc only): refuse to green-light a batch while Azul is
+        # (re)indexing -- manifests would be empty/incomplete (see azul_auth.assert_azul_not_reindexing).
+        # This complements the pipeline's own per-run check, which catches a reindex that starts
+        # mid-batch. Fail-open on a health-endpoint blip: warn, don't block.
+        try:
+            assert_azul_not_reindexing(tier.url("azul"))
+            reindex_line = "Azul indexing idle"
+        except AzulReindexingError as exc:
+            raise RunnerFatalError(str(exc)) from exc
+        except (requests.RequestException, ValueError) as exc:  # blip / malformed health response
+            logger.warning("Could not check Azul indexing status: %s; proceeding.", exc)
+            reindex_line = f"Azul indexing status unknown ({exc})"
     else:
         token_line = "Azul token not required (tdr_qc)"
+        reindex_line = "Azul indexing check not applicable (tdr_qc)"
     summary = (
         f"AUTH VERIFIED — tier {tier.name}: operating as {identity}; "
         f"workspace {client.namespace}/{client.name} reachable; "
-        f"method config {method_ns}/{method_name} (rootEntityType={entity_type}); {token_line}"
+        f"method config {method_ns}/{method_name} (rootEntityType={entity_type}); "
+        f"{token_line}; {reindex_line}"
     )
     logger.info("✓ %s", summary)
     return summary

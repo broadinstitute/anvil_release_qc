@@ -43,6 +43,11 @@ TOKENINFO_URL = "https://www.googleapis.com/oauth2/v3/tokeninfo"
 # azul-login) rather than expire mid-run.
 MIN_TOKEN_SECONDS_FOR_RUN = 1800  # 30 minutes
 
+# Azul's health endpoint reporting the global indexing backlog. During a (re)index the manifest APIs
+# still return 200 but with an EMPTY/incomplete manifest (Azul is unaware of the in-progress index), so
+# QC would run against bad data; a non-zero backlog on either counter means indexing is in progress.
+HEALTH_PROGRESS_PATH = "/health/progress"
+
 # A Google OAuth client id, e.g. "5615...-3cv4....apps.googleusercontent.com".
 _CLIENT_ID_RE = re.compile(r"([0-9]+-[A-Za-z0-9_]+\.apps\.googleusercontent\.com)")
 # A bearer token in a pasted "Authorization: Bearer <token>" / curl line.
@@ -51,6 +56,15 @@ _BEARER_RE = re.compile(r"(?i)bearer\s+([A-Za-z0-9._~+/\-]+=*)")
 
 class AzulTokenError(RuntimeError):
     """Raised when the Azul token is missing, malformed, or fails validation."""
+
+
+class AzulReindexingError(RuntimeError):
+    """Raised when Azul is (re)indexing (or unhealthy), so a manifest would be empty/incomplete.
+
+    ade-qc must not run during an Azul (re)index: the manifest API returns 200 with an empty/incomplete
+    manifest (it does not signal indexing state), which yields unreliable QC and a confusing downstream
+    import "not found or empty" failure. This is retryable -- re-run after indexing completes.
+    """
 
 
 def tokeninfo(access_token: str) -> dict:
@@ -83,6 +97,49 @@ def discover_azul_client_id(azul_base_url: str) -> str:
 def expected_client_id(tier: ResolvedTier) -> str:
     """The ``azp`` an Azul token must carry: the tier's configured client id, else auto-discovered."""
     return tier.azul_oauth2_client_id or discover_azul_client_id(tier.url("azul"))
+
+
+def azul_indexing_backlog(azul_base_url: str, *, timeout: int = 30) -> tuple[bool, int, int]:
+    """Query Azul ``/health/progress``; return ``(up, unindexed_bundles, unindexed_documents)``.
+
+    ``up`` is Azul's top-level health flag; the two counts are the outstanding indexing backlog (both 0
+    when indexing is idle). Raises for a network error / non-200 -- callers that want to fail-open on an
+    unreachable health endpoint catch ``requests`` errors around this call.
+    """
+    url = f"{azul_base_url.rstrip('/')}{HEALTH_PROGRESS_PATH}"
+    resp = requests.get(url, headers={"accept": "application/json"}, timeout=timeout)
+    resp.raise_for_status()
+    data = resp.json()
+    progress = data.get("progress") or {}
+    up = bool(data.get("up", False))
+    bundles = int(progress.get("unindexed_bundles", 0) or 0)
+    documents = int(progress.get("unindexed_documents", 0) or 0)
+    return up, bundles, documents
+
+
+def assert_azul_not_reindexing(azul_base_url: str) -> None:
+    """Raise ``AzulReindexingError`` if Azul is (re)indexing (any non-zero backlog) or reports not up.
+
+    Strict-zero by design: any outstanding backlog means a dataset may be empty/incomplete in Azul, so QC
+    must not run (a false block is safely retryable; a false proceed produces bad QC). A network error on
+    the health endpoint is *not* swallowed here -- callers decide whether to fail-open on an unreachable
+    health check. See docs/qc_batch_runner.md ("Running under Terra load" / Azul reindexing).
+    """
+    url = f"{azul_base_url.rstrip('/')}{HEALTH_PROGRESS_PATH}"
+    up, bundles, documents = azul_indexing_backlog(azul_base_url)
+    if not up:
+        raise AzulReindexingError(
+            f"Azul reports not healthy (up=false) at {url}; not exporting. Re-run when Azul is up."
+        )
+    if bundles or documents:
+        raise AzulReindexingError(
+            f"Azul is (re)indexing (unindexed_bundles={bundles}, unindexed_documents={documents} at "
+            f"{url}): the exported manifest would be empty or incomplete and QC results unreliable. "
+            "Aborting before export; re-run after reindexing completes."
+        )
+    logger.info(
+        "Azul indexing idle (unindexed_bundles=0, unindexed_documents=0 at %s); proceeding.", url
+    )
 
 
 def validate_azul_token(

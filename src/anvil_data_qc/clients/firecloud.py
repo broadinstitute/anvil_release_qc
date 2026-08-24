@@ -72,7 +72,18 @@ class FirecloudClient(BaseClient):
             if status == SUCCESS_STATUS:
                 return job
             if status in FAILURE_STATUSES:
-                raise RuntimeError(f"Import job {job_id} failed with status '{status}': {job}")
+                # Backstop for an empty/incomplete import source. For ade-qc this most often means Azul was
+                # (re)indexing when the manifest was generated (its manifest API returns 200 with an empty
+                # manifest); the ade-qc reindexing preflight normally catches this first, but a reindex can
+                # begin in the small window after that check. See azul_auth.assert_azul_not_reindexing.
+                hint = ""
+                if "not found, or file was empty" in str(job):
+                    hint = (
+                        " -- the imported manifest was empty/incomplete; for ade-qc this commonly means "
+                        "Azul was (re)indexing when the manifest was generated (check Azul /health/progress "
+                        "and re-run after indexing completes)"
+                    )
+                raise RuntimeError(f"Import job {job_id} failed with status '{status}': {job}{hint}")
             if time.monotonic() > deadline:
                 raise TimeoutError(f"Import job {job_id} did not finish within {max_wait}s.")
             time.sleep(poll_interval)

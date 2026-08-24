@@ -32,6 +32,8 @@ from . import __version__
 from .auth import assert_tier_identity, bearer_token, credentials_for_tier
 from .azul_auth import (
     MIN_TOKEN_SECONDS_FOR_RUN,
+    AzulReindexingError,
+    assert_azul_not_reindexing,
     expected_client_id,
     read_azul_token,
     validate_azul_token,
@@ -467,6 +469,21 @@ def run_ade_qc(
     dataset_id = resolve_dataset_id(
         setup.creds, bq_project, bq_dataset, tier.billing_google_project_id
     )
+
+    # Azul reindexing preflight (ade-qc only). During a UCSC/Azul (re)index the manifest API still
+    # returns 200 but the manifest is EMPTY/incomplete (Azul is unaware of the in-progress index), which
+    # makes QC results unreliable and surfaces later as a confusing import "not found or empty" failure.
+    # Fail fast on a detected (re)index -- AzulReindexingError -> CLI exit 2 (retryable). A health-endpoint
+    # error is NOT fatal here: a transient blip must not block a run, and a genuine reindex is still caught
+    # by the import backstop -- so we log and proceed. Covers dry runs too (a dry run also builds a
+    # manifest). See azul_auth.assert_azul_not_reindexing.
+    try:
+        assert_azul_not_reindexing(tier.url("azul"))
+    except AzulReindexingError as exc:
+        logger.error("%s", exc)
+        raise
+    except (requests.RequestException, ValueError) as exc:  # network blip / malformed health response
+        logger.warning("Could not check Azul indexing status (%s); proceeding.", exc)
 
     # 3. Azul: generate the PFB manifest and obtain the signed S3 URL (token validated above).
     durations: dict[str, float] = {}
