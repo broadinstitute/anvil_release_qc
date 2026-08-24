@@ -83,6 +83,7 @@ fails fast telling you exactly what's missing. This is the quickest way to shake
 | "Access denied (HTTP 403) to Terra workspace …" | authorized to *run*, but not shared on the workspace | ask the workspace owner to grant you access |
 | `operating as` shows the **wrong** account | wrong `adc_credentials_file`, or logged in as the wrong account | point `adc_credentials_file` at the right account (or re-login) |
 | Azul token rejected / wrong account | `azul-login` was run as the wrong Google account | re-run `azul-login` signed in as your tier account |
+| `ade_qc` exits **2** with "Azul is (re)indexing…" (or an import "not found, or file was empty") | the ADE/Azul catalog is mid-(re)index → manifests are empty/incomplete | **wait** for the reindex to finish, then re-run — idempotency retries only the failures; check `GET …/health/progress`. See [qc_batch_runner.md → Azul reindexing](qc_batch_runner.md#azul-reindexing) |
 
 ## See also
 

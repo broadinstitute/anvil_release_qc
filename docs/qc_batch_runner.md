@@ -273,6 +273,47 @@ so it can't be tuned here — those runs simply retry.
 *(Roadmap: a launch-pacing option would let the runner self-limit its creation rate to the pool's refill
 rate and adapt to time-of-day load automatically.)*
 
+## Azul reindexing
+
+`ade_qc` exports through the **ADE/Azul** index, and **QC must not run while that index is being
+(re)built.** Periodically the UCSC ADE/Azul team **reindexes** a catalog (e.g. `anvil15`) — often to
+reprocess data after an indexing-software change. While a catalog is (re)indexing its datasets may be
+**empty or incomplete** in Azul, so an export taken then yields a wrong verdict (typically a false FAIL —
+the Analysis Workspace comes up short against the unchanged TDR snapshot).
+
+The trap: **the Azul manifest API doesn't signal indexing state** — it returns `200 OK` with an
+*empty/incomplete* manifest instead of a "try again later" error. The failure then surfaces late and
+misleadingly, deep in the import as `Intermediate batch upsert file … not found, or file was empty` (it
+looks like an import bug, not "the source index is mid-rebuild"). UCSC's reindex notices are vague on
+timing/scope and the ADE UI only *sometimes* disables Export during a reindex — so **you can't rely on
+knowing** a reindex is underway.
+
+**What the tool does (v0.3.5+).** Before exporting, `ade_qc` runs a **reindexing preflight**: it reads
+Azul's `GET /health/progress` and, if **either** `unindexed_bundles` or `unindexed_documents` is non-zero,
+**fails fast with exit 2** — *before* any export — rather than producing a bad verdict. Exit 2 is a
+retryable "cannot run now" abort, not a QC FAIL, so:
+
+- In a **batch**, `qc-batch-runner` records it like any other retryable failure and continues. Because the
+  check runs **per dataset**, a reindex that **starts mid-batch** just fails the remaining datasets fast
+  (the observed pattern: passing, then failing) — re-run them once indexing finishes and **idempotency**
+  retries only those.
+- `qc-batch-runner --verify-auth` (ade_qc) makes the **same** check, so you can confirm "not reindexing"
+  *before* launching a batch.
+- A transient blip reaching `/health/progress` does **not** block a run (fail-open on the check); and if a
+  reindex begins in the small window *after* the preflight passes, the import error now carries a hint
+  pointing back here.
+
+**Check it yourself** (unauthenticated; prod ADE — dev's Azul URL is in [services.md](services.md)):
+
+```bash
+curl -s https://service.explore.anvilproject.org/health/progress | python -m json.tool
+#   both unindexed_* == 0  ⇒  safe to QC;   any non-zero  ⇒  wait, then re-run later.
+```
+
+> **`/health/progress` is deployment-wide, not per-catalog:** a reindex of *any* catalog blocks `ade_qc`
+> until it finishes. That over-blocking is deliberate — a false block is just a retry, whereas a false
+> *proceed* produces a bad verdict. **`tdr_qc` doesn't use Azul, so it's unaffected.**
+
 ## Limitations & where human review matters most
 
 - **Orchestration only — it does not deepen the QC.** Each dataset's guarantees are exactly those of the
