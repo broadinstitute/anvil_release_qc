@@ -104,6 +104,36 @@ def test_indexing_backlog_parses(monkeypatch):
     assert azul_indexing_backlog("https://azul.example/") == (True, 5, 3)
 
 
+def test_indexing_backlog_non_object_body_raises_valueerror(monkeypatch):
+    # A valid-JSON but non-object body must surface as ValueError (which callers fail-open on), NOT
+    # AttributeError -- else a malformed 200 escapes fail-open and becomes a false QC FAIL.
+    monkeypatch.setattr(
+        azul_auth.requests, "get", lambda *a, **k: _FakeResp(json_data=["not", "an", "object"])
+    )
+    with pytest.raises(ValueError):
+        azul_indexing_backlog("https://azul.example/")
+
+
+def test_indexing_backlog_nondict_progress_raises_valueerror(monkeypatch):
+    monkeypatch.setattr(
+        azul_auth.requests,
+        "get",
+        lambda *a, **k: _FakeResp(json_data={"up": True, "progress": "reindexing"}),
+    )
+    with pytest.raises(ValueError):
+        azul_indexing_backlog("https://azul.example/")
+
+
+def test_indexing_backlog_non_integer_count_raises_valueerror(monkeypatch):
+    monkeypatch.setattr(
+        azul_auth.requests,
+        "get",
+        lambda *a, **k: _FakeResp(json_data={"up": True, "progress": {"unindexed_bundles": [1]}}),
+    )
+    with pytest.raises(ValueError):
+        azul_indexing_backlog("https://azul.example/")
+
+
 def test_not_reindexing_when_idle(monkeypatch):
     monkeypatch.setattr(azul_auth.requests, "get", lambda *a, **k: _FakeResp(json_data=_progress()))
     assert assert_azul_not_reindexing("https://azul.example/") is None  # does not raise
