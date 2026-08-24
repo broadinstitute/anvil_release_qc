@@ -213,6 +213,66 @@ qc-batch-runner -p tdr_qc --table anvil15_qc -s too_large.tsv --tier prod
 `qc_workspace_name` must be set in the tier config (or passed with `--qc-workspace-name`), e.g.
 `anvil-data-qc-shared`.
 
+## Running under Terra load
+
+Batch QC creates Terra workspaces and imports data faster than an interactive user, and under load the
+shared Terra backend (Rawls + the import service) pushes back. This is the single most important thing to
+understand for large batches. **The resulting failures are transient and load-driven — not problems with
+your data or the tool** — the pipeline already recovers from most of them, and the rest are handled by
+pacing + reruns.
+
+### The mechanism — the pre-created workspace pool
+
+To keep interactive workspace creation fast, Terra keeps a **pool of pre-created workspaces** (each Terra
+workspace is heavy — its own Google project, bucket, and security settings). A batch that creates
+workspaces faster than the pool refills **drains** it; further creates fall back to slow **from-scratch**
+provisioning (minutes) and latency climbs sharply (a "hockey stick"). So the real constraint is your
+**workspace-creation _rate_ vs. the pool's refill rate**, not just instantaneous concurrency.
+
+That creation rate is set by **two** factors, not just `--max-concurrent`: it also depends on **how long
+each dataset takes**, which scales with the dataset's **tabular-data volume**. Small datasets export and
+import quickly, so workspaces are created in rapid succession — a *higher* processing rate that drains the
+pool *faster*; large datasets take longer per run, so workspaces are created less often — a *lower* rate,
+gentler on the pool. So the same `--max-concurrent` can pressure the backend quite differently depending on
+dataset sizes (a batch of many small datasets can push harder than the same cap on large ones). Looking
+ahead, the deeper **T3–T4** comparison steps ([comparison.md](comparison.md)) will add per-dataset time in
+proportion to data volume, further lowering the processing rate.
+
+### Transient failure signatures (all load-driven, all retryable)
+
+| Symptom | Stage | What it means |
+|---|---|---|
+| `createWorkspace` → **502 Bad Gateway** (~120 s) | before import | pool drained → slow from-scratch create; a proxy in front of Rawls timed out. The workspace is often created server-side anyway. |
+| `createWorkspace` → **500** (~60 s), no workspace | before import | Rawls errored outright under load; nothing was created. |
+| import job `Error`: `Rawls.createSnapshotReference … Idle timeout expired: 30000/30000 ms` | import | the import service's 30 s call to Rawls timed out under load (independent of the workspace pool). |
+
+Tell-tale that it's **load, not your data**: the errors are **identical across datasets** and track
+**time of day** (worse during business hours, when other users share the backend; the Terra Rawls service
+logs show compute-pool starvation — *"CPU is probably starving"* — at those times).
+
+**What the tool handles automatically (v0.3.4+):** on a `createWorkspace` timeout *or* 5xx the pipeline
+**confirm-or-adopts** — it checks whether the workspace was actually created and, if so, continues into
+the import instead of orphaning it; if it genuinely wasn't created it fails cleanly for a retry
+(`_create_workspace_resilient`). The import-stage 30 s timeout lives in Terra's import service (not ours),
+so it can't be tuned here — those runs simply retry.
+
+### Operating recipe
+
+- **Pace by time of day.** Business hours → run **`--max-concurrent 1`** (reliable). Off-hours / weekends
+  → step up to **2–3** to catch up. High concurrency during peak load is what triggers the symptoms above.
+- **Work in small, paced chunks** rather than one giant sweep, letting the pool refill between them.
+- **Reruns are the safety net.** Continue-on-failure records each failure and keeps going; on a rerun,
+  **idempotency skips** the datasets that already passed and retries only the failures — so you converge by
+  re-running the same list until everything is green.
+- **Calibrate the safe rate.** Sort a finished batch by launch time and read each row's
+  `ade_workspace_create_minutes`: you'll see a **knee** — N fast (~0.4 min) creates, then a jump toward the
+  ~2-min ceiling. That N ≈ the pool headroom you had; keep a chunk under it to stay on the fast path. (We've
+  observed headroom ≈ 10.)
+- **When in doubt,** `--verify-auth` / `--dry-run` first, then a small canary, then scale.
+
+*(Roadmap: a launch-pacing option would let the runner self-limit its creation rate to the pool's refill
+rate and adapt to time-of-day load automatically.)*
+
 ## Limitations & where human review matters most
 
 - **Orchestration only — it does not deepen the QC.** Each dataset's guarantees are exactly those of the
@@ -237,8 +297,11 @@ conclusion.
 
 ## Roadmap (deferred, post-v1)
 
-Sliding-window policy (v2); a machine-readable results file; 3.10 packaging (relax `requires-python`) +
-a WDL wrapper for unattended runs; per-snapshot `public`-flag token skip; a `perWorkflowCostCap`.
+Sliding-window policy (v2); **launch-pacing** — a min inter-launch delay / adaptive throttle so the runner
+self-limits its workspace-creation rate to the pool's refill rate (and eases the manual time-of-day tuning
+in [Running under Terra load](#running-under-terra-load)); a machine-readable results file; 3.10 packaging
+(relax `requires-python`) + a WDL wrapper for unattended runs; per-snapshot `public`-flag token skip; a
+`perWorkflowCostCap`.
 
 ## References
 
