@@ -103,17 +103,26 @@ def azul_indexing_backlog(azul_base_url: str, *, timeout: int = 30) -> tuple[boo
     """Query Azul ``/health/progress``; return ``(up, unindexed_bundles, unindexed_documents)``.
 
     ``up`` is Azul's top-level health flag; the two counts are the outstanding indexing backlog (both 0
-    when indexing is idle). Raises for a network error / non-200 -- callers that want to fail-open on an
-    unreachable health endpoint catch ``requests`` errors around this call.
+    when indexing is idle). Raises ``requests.RequestException`` for a network error / non-200 and
+    ``ValueError`` for a malformed body (non-JSON, or a JSON shape/type we cannot parse). Callers that
+    want to fail-open on an unreachable *or malformed* health endpoint catch both around this call -- a
+    health-check hiccup must never turn into a false QC verdict.
     """
     url = f"{azul_base_url.rstrip('/')}{HEALTH_PROGRESS_PATH}"
     resp = requests.get(url, headers={"accept": "application/json"}, timeout=timeout)
     resp.raise_for_status()
-    data = resp.json()
-    progress = data.get("progress") or {}
-    up = bool(data.get("up", False))
-    bundles = int(progress.get("unindexed_bundles", 0) or 0)
-    documents = int(progress.get("unindexed_documents", 0) or 0)
+    try:
+        data = resp.json()
+        progress = data.get("progress") or {}
+        up = bool(data.get("up", False))
+        bundles = int(progress.get("unindexed_bundles", 0) or 0)
+        documents = int(progress.get("unindexed_documents", 0) or 0)
+    except (AttributeError, TypeError, ValueError) as exc:
+        # A valid-JSON-but-unexpected shape (non-object body, non-dict "progress", non-integer counts)
+        # would otherwise raise AttributeError/TypeError, which the callers' fail-open ``except`` does
+        # NOT catch -- so a malformed health response would escape and become a false QC FAIL. Normalize
+        # every parse failure to ValueError, which callers catch and fail-open on.
+        raise ValueError(f"unexpected /health/progress response: {exc}") from exc
     return up, bundles, documents
 
 
