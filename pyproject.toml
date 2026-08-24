@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "anvil-data-qc"
-version = "0.3.4"
+version = "0.3.5"
 description = "Processes and tools for AnVIL Data Release quality control"
 readme = "README.md"
 requires-python = ">=3.13"
