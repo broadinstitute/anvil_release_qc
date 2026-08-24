@@ -42,6 +42,8 @@ workflow AdeQc {
         File detailed_log = ade_qc.detailed_log
         Int qc_exit_code = ade_qc.qc_exit_code
         Boolean qc_passed = ade_qc.qc_passed
+        String run_began = ade_qc.run_began
+        String run_ended = ade_qc.run_ended
         Float azul_manifest_minutes = ade_qc.azul_manifest_minutes
         Float workspace_create_minutes = ade_qc.workspace_create_minutes
         Float import_minutes = ade_qc.import_minutes
@@ -84,6 +86,11 @@ task ade_qc {
         # The pipeline logs to stderr; capture the exit code without failing the task. 0 = PASS,
         # 1 = QC failure, 2 = safety abort (e.g. a controlled snapshot without the opt-in) or a
         # preflight/config failure (e.g. a misconfigured billing_google_project_id).
+        # Run start/end wall-clock (UTC, ISO 8601 to the second) bracketing the CLI invocation, surfaced
+        # as data-table columns for QC management -- e.g. sort by run time, or spot rows QC'd before a
+        # UCSC reindex/fix. Captured here (not in the pipeline) so they reflect true task wall-clock and
+        # are present on every path (the task always completes; the CLI exit code is captured, not fatal).
+        date -u '+%Y-%m-%dT%H:%M:%SZ' > run_began.txt
         set +e
         anvil-data-qc ade-qc \
             --config "~{config}" \
@@ -96,6 +103,7 @@ task ade_qc {
             2> detailed_log.txt
         echo "$?" > qc_exit_code.txt
         set -e
+        date -u '+%Y-%m-%dT%H:%M:%SZ' > run_ended.txt
 
         # The pipeline logs the QC report into the detailed log; extract it as a clean report output,
         # then append the end-of-run stage-timing summary line (minutes) so it rides with the report.
@@ -135,6 +143,9 @@ task ade_qc {
         File detailed_log = "detailed_log.txt"
         Int qc_exit_code = read_int("qc_exit_code.txt")
         Boolean qc_passed = read_int("qc_exit_code.txt") == 0
+        # Run start/end wall-clock (UTC, ISO 8601, second granularity), captured around the CLI call.
+        String run_began = read_string("run_began.txt")
+        String run_ended = read_string("run_ended.txt")
         # Per-stage durations in minutes (the user-experienced delays); 0 if the stage did not run.
         Float azul_manifest_minutes = read_float("azul_manifest_minutes.txt")
         Float workspace_create_minutes = read_float("workspace_create_minutes.txt")

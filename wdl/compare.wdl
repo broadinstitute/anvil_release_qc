@@ -33,6 +33,8 @@ workflow Compare {
         File detailed_log = compare.detailed_log
         Int qc_exit_code = compare.qc_exit_code
         Boolean qc_passed = compare.qc_passed
+        String run_began = compare.run_began
+        String run_ended = compare.run_ended
         Int total_table_count = compare.total_table_count
         Int total_row_count = compare.total_row_count
         Int total_value_count = compare.total_value_count
@@ -67,6 +69,11 @@ task compare {
         # stdout -> the report; stderr -> the detailed request/response log. Capture the exit code
         # without failing the task. 0 = PASS, 1 = QC failure, 2 = safety abort or a preflight/config
         # failure (e.g. a misconfigured billing_google_project_id).
+        # Run start/end wall-clock (UTC, ISO 8601 to the second) bracketing the CLI invocation, surfaced
+        # as data-table columns for QC management (sort by run time / track when each check last ran).
+        # Captured here (not in the pipeline) so they reflect true task wall-clock and are present on
+        # every path (the task always completes; the CLI exit code is captured, not fatal).
+        date -u '+%Y-%m-%dT%H:%M:%SZ' > run_began.txt
         set +e
         anvil-data-qc compare \
             --config "~{config}" \
@@ -77,6 +84,7 @@ task compare {
             > qc_report.txt 2> detailed_log.txt
         echo "$?" > qc_exit_code.txt
         set -e
+        date -u '+%Y-%m-%dT%H:%M:%SZ' > run_ended.txt
 
         # Data-volume counts: the `compare` command echoes the line into the report (stdout). Parse the
         # counts (commas stripped) into Int outputs; default 0 if absent.
@@ -101,6 +109,9 @@ task compare {
         File detailed_log = "detailed_log.txt"
         Int qc_exit_code = read_int("qc_exit_code.txt")
         Boolean qc_passed = read_int("qc_exit_code.txt") == 0
+        # Run start/end wall-clock (UTC, ISO 8601, second granularity), captured around the CLI call.
+        String run_began = read_string("run_began.txt")
+        String run_ended = read_string("run_ended.txt")
         # Snapshot data volume (non-system, non-empty tables) — useful for the post-import-timeout re-check.
         Int total_table_count = read_int("total_table_count.txt")
         Int total_row_count = read_int("total_row_count.txt")
