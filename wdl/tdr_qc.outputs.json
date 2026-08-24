@@ -4,6 +4,8 @@
   "TdrQc.qc_exit_code": "${this.tdr_qc_exit_code}",
   "TdrQc.qc_passed": "${this.tdr_qc_passed}",
   "TdrQc.qc_report": "${this.tdr_qc_report}",
+  "TdrQc.run_began": "${this.tdr_run_began}",
+  "TdrQc.run_ended": "${this.tdr_run_ended}",
   "TdrQc.tdr_export_minutes": "${this.tdr_export_minutes}",
   "TdrQc.total_row_count": "${this.total_row_count}",
   "TdrQc.total_table_count": "${this.total_table_count}",

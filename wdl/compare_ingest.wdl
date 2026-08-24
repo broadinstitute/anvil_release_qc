@@ -36,6 +36,8 @@ workflow CompareIngest {
         File detailed_log = compare_ingest.detailed_log
         Int qc_exit_code = compare_ingest.qc_exit_code
         Boolean qc_passed = compare_ingest.qc_passed
+        String run_began = compare_ingest.run_began
+        String run_ended = compare_ingest.run_ended
     }
 
     parameter_meta {
@@ -68,6 +70,11 @@ task compare_ingest {
         # Capture the exit code without failing the task (set +e), so the report is always delocalized
         # and batch runs can aggregate. 0 = PASS, 1 = QC failure, 2 = safety abort or a preflight/config
         # failure (e.g. a misconfigured billing_google_project_id).
+        # Run start/end wall-clock (UTC, ISO 8601 to the second) bracketing the CLI invocation, surfaced
+        # as data-table columns for QC management (sort by run time / track when each check last ran).
+        # Captured here (not in the pipeline) so they reflect true task wall-clock and are present on
+        # every path (the task always completes; the CLI exit code is captured, not fatal).
+        date -u '+%Y-%m-%dT%H:%M:%SZ' > run_began.txt
         set +e
         anvil-data-qc compare-ingest \
             --config "~{config}" \
@@ -78,6 +85,7 @@ task compare_ingest {
             > qc_report.txt 2> detailed_log.txt
         echo "$?" > qc_exit_code.txt
         set -e
+        date -u '+%Y-%m-%dT%H:%M:%SZ' > run_ended.txt
 
         cat qc_report.txt  # also surface the report in the Cromwell task stdout
     >>>
@@ -94,5 +102,8 @@ task compare_ingest {
         File detailed_log = "detailed_log.txt"
         Int qc_exit_code = read_int("qc_exit_code.txt")
         Boolean qc_passed = read_int("qc_exit_code.txt") == 0
+        # Run start/end wall-clock (UTC, ISO 8601, second granularity), captured around the CLI call.
+        String run_began = read_string("run_began.txt")
+        String run_ended = read_string("run_ended.txt")
     }
 }

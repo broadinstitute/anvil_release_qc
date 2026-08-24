@@ -168,6 +168,19 @@ import**, e.g. `import_minutes≈120` when the 2 h wait elapses), as sortable da
 | `workspace_create_minutes` (Float) | Rawls `createWorkspace` |
 | `import_minutes` (Float) | Firecloud `importJob` — usually the dominant stage, growing with dataset size |
 
+**All four workflows** — run start/end wall-clock, captured by the WDL task around the CLI call
+(so present on **every** row, including failures), as sortable data-table columns:
+
+| Output | Meaning |
+|---|---|
+| `run_began` (String) | when the run started |
+| `run_ended` (String) | when the run finished (success *or* failure) |
+
+Both are **UTC, ISO 8601 to the second** (e.g. `2026-08-23T13:09:24Z`). Terra data tables have no
+date/time type, so they're strings — chosen to **sort chronologically**, be timezone-unambiguous (UTC/`Z`)
+for operators across time zones, and contain no spaces (so a TSV export stays unquoted in Excel). Useful
+for QC management — e.g. sorting by run time, or spotting rows last QC'd **before** a UCSC reindex/fix.
+
 The task **always succeeds** so the report is always produced (a *failed* Cromwell task delocalizes no
 outputs). Identify failures by the `qc_passed` / `qc_exit_code` columns — no need to open each report.
 (QC comparison time is intentionally *not* reported — it's quick and not a user-experienced delay.)
@@ -184,8 +197,10 @@ The production `*.outputs.json` route **both** `ade-qc` and `tdr-qc` back to tha
 **prefixing** each flow's outputs so they coexist without collision:
 
 - `ade-qc` outputs → **`ade_*`** columns (`ade_qc_passed`, `ade_qc_exit_code`, `ade_qc_report`,
-  `ade_detailed_log`, `ade_manifest_minutes`, `ade_workspace_create_minutes`, `ade_import_minutes`).
-- `tdr-qc` outputs → **`tdr_*`** columns (`tdr_qc_passed`, …, `tdr_export_minutes`, `tdr_import_minutes`).
+  `ade_detailed_log`, `ade_run_began`, `ade_run_ended`, `ade_manifest_minutes`,
+  `ade_workspace_create_minutes`, `ade_import_minutes`).
+- `tdr-qc` outputs → **`tdr_*`** columns (`tdr_qc_passed`, …, `tdr_run_began`, `tdr_run_ended`,
+  `tdr_export_minutes`, `tdr_import_minutes`).
 - the three data-volume counts (`total_table_count` / `total_row_count` / `total_value_count`) are left
   **unprefixed and shared**: both flows compute them from the *same* TDR snapshot, so they coincide — and
   the shared column doubles as a **cross-flow consistency check** (a divergence would itself be a signal).
@@ -196,8 +211,9 @@ Why one table per release:
 - it supports **qualitative (PASS/FAIL) and quantitative (durations) comparison** between the two export
   routes, and the table **exports to TSV** for spreadsheet graphing/reporting.
 
-`compare` / `compare-ingest` use **unprefixed** columns (their own runs, typically a separate table);
-`compare-ingest` emits no count columns (an intentional partial comparison).
+`compare` / `compare-ingest` use **unprefixed** columns (their own runs, typically a separate table) —
+including `run_began` / `run_ended`; `compare-ingest` emits no count columns (an intentional partial
+comparison).
 
 ## 5. Validate WDL changes locally
 
