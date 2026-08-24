@@ -3,6 +3,7 @@
 from typer.testing import CliRunner
 
 from anvil_data_qc import cli
+from anvil_data_qc.azul_auth import AzulReindexingError
 
 runner = CliRunner()
 
@@ -46,3 +47,12 @@ def test_ade_qc_verify_auth_defaults_false(monkeypatch):
     res = runner.invoke(cli.app, ["ade-qc", "-s", "snap-1"])
     assert res.exit_code == 0
     assert captured["verify_auth"] is False
+
+
+def test_ade_qc_reindexing_exits_2(monkeypatch):
+    def boom(**_kwargs):  # Azul (re)indexing detected in the pipeline preflight
+        raise AzulReindexingError("Azul is (re)indexing (unindexed_bundles=5)")
+
+    monkeypatch.setattr(cli, "run_ade_qc", boom)
+    res = runner.invoke(cli.app, ["ade-qc", "-s", "snap-1"])
+    assert res.exit_code == 2  # a retryable "cannot run now" abort, not a QC verdict
