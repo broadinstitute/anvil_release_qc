@@ -44,6 +44,8 @@ workflow AdeQc {
         Boolean qc_passed = ade_qc.qc_passed
         String run_began = ade_qc.run_began
         String run_ended = ade_qc.run_ended
+        String workspace_namespace = ade_qc.workspace_namespace
+        String workspace_name = ade_qc.workspace_name
         Float azul_manifest_minutes = ade_qc.azul_manifest_minutes
         Float workspace_create_minutes = ade_qc.workspace_create_minutes
         Float import_minutes = ade_qc.import_minutes
@@ -128,6 +130,14 @@ task ade_qc {
             [ -s "${metric}.txt" ] || echo 0 > "${metric}.txt"
         done
 
+        # Created Analysis Workspace (namespace/name), logged by the pipeline BEFORE the import so it is
+        # present even if the import failed (the retained workspace exists) -- for a later `compare`,
+        # cross-operator access, or cleanup. Empty if no workspace was created (dry run / pre-import
+        # failure). namespace + name are [A-Za-z0-9_-] (no spaces/slashes), so the single '/' splits them.
+        WS="$(grep -F 'QC workspace:' detailed_log.txt | tail -1 | sed -E 's#.*QC workspace: ##' || true)"
+        printf '%s' "${WS%%/*}" > workspace_namespace.txt
+        printf '%s' "${WS#*/}"  > workspace_name.txt
+
         cat detailed_log.txt  # surface the full log in the Cromwell task stdout
     >>>
 
@@ -146,6 +156,10 @@ task ade_qc {
         # Run start/end wall-clock (UTC, ISO 8601, second granularity), captured around the CLI call.
         String run_began = read_string("run_began.txt")
         String run_ended = read_string("run_ended.txt")
+        # The created Analysis Workspace (namespace/name); empty if none was created (dry run /
+        # pre-import failure). Present even on a failed import (the retained workspace exists).
+        String workspace_namespace = read_string("workspace_namespace.txt")
+        String workspace_name = read_string("workspace_name.txt")
         # Per-stage durations in minutes (the user-experienced delays); 0 if the stage did not run.
         Float azul_manifest_minutes = read_float("azul_manifest_minutes.txt")
         Float workspace_create_minutes = read_float("workspace_create_minutes.txt")

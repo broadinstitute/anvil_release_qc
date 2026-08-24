@@ -10,5 +10,7 @@
   "AdeQc.total_row_count": "${this.total_row_count}",
   "AdeQc.total_table_count": "${this.total_table_count}",
   "AdeQc.total_value_count": "${this.total_value_count}",
-  "AdeQc.workspace_create_minutes": "${this.ade_workspace_create_minutes}"
+  "AdeQc.workspace_create_minutes": "${this.ade_workspace_create_minutes}",
+  "AdeQc.workspace_name": "${this.ade_workspace_name}",
+  "AdeQc.workspace_namespace": "${this.ade_workspace_namespace}"
 }
