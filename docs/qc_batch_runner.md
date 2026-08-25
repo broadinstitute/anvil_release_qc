@@ -310,6 +310,12 @@ curl -s https://service.explore.anvilproject.org/health/progress | python -m jso
 #   both unindexed_* == 0  ⇒  safe to QC;   any non-zero  ⇒  wait, then re-run later.
 ```
 
+**Expect the drain to be uneven.** A reindex's backlog does **not** fall smoothly to zero — it can sit at
+a **small non-zero for hours** before dropping to `0` all at once (observed in prod 2026-08-24:
+`unindexed_documents` held at `4` for hours, then went straight to `0`). So a small, stuck count **does
+not** mean "almost done," and you can't gauge progress by watching the number tick down. Re-check with
+`qc-batch-runner --verify-auth` (or the `curl` above) when you're ready to run, rather than guessing.
+
 > **`/health/progress` is deployment-wide, not per-catalog:** a reindex of *any* catalog blocks `ade_qc`
 > until it finishes. That over-blocking is deliberate — a false block is just a retry, whereas a false
 > *proceed* produces a bad verdict. **`tdr_qc` doesn't use Azul, so it's unaffected.**
