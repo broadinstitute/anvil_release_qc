@@ -14,9 +14,8 @@ from urllib.parse import urlsplit
 
 import requests
 
-from ..logging_setup import LOGGER_NAME, correlation_fields, redact_headers
-from ..redaction import redact_text
-from ..safety import BearerDestinationError
+from anvil_release_qc.logging_setup import LOGGER_NAME, log_request, log_response
+from anvil_release_qc.safety import BearerDestinationError
 
 logger = logging.getLogger(LOGGER_NAME)
 
@@ -71,15 +70,7 @@ class BaseClient:
                     f"(expected https://{self._host}). A token may only go to its own service host."
                 )
 
-        # Log the request with secrets redacted: bearer token in headers, plus signed-URL
-        # signatures / AWS creds / tokens that can appear in the URL, params, or body (e.g. the
-        # importJob body carries a signed S3 PFB URL).
-        logger.debug("%s %s", method, redact_text(url))
-        if params:
-            logger.debug("  params: %s", redact_text(str(params)))
-        logger.debug("  headers: %s", redact_headers(all_headers))
-        if json_body is not None:
-            logger.debug("  body: %s", redact_text(json.dumps(json_body)))
+        log_request(logger, method, url, params, json.dumps(json_body) if json_body is not None else None)
 
         resp = self._session.request(
             method,
@@ -90,10 +81,6 @@ class BaseClient:
             timeout=self._timeout if timeout is None else timeout,
         )
 
-        # Log the response status and any correlation/trace ids.
-        corr = correlation_fields(resp.headers)
-        logger.debug(
-            "  -> %s %s%s", resp.status_code, resp.reason or "", f"  {corr}" if corr else ""
-        )
+        log_response(logger, resp)
         resp.raise_for_status()
         return resp

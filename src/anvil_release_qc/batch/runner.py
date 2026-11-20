@@ -25,7 +25,7 @@ from typing import Callable, Optional
 import requests
 from google.auth.credentials import Credentials
 
-from ..azul_auth import (
+from anvil_release_qc.azul_auth import (
     MIN_TOKEN_SECONDS_FOR_RUN,
     AzulReindexingError,
     AzulTokenError,
@@ -34,17 +34,17 @@ from ..azul_auth import (
     token_from_file_text,
     validate_azul_token,
 )
-from ..config import ResolvedTier
-from ..logging_setup import LOGGER_NAME
-from .gcs import read_gcs_text
-from .terra import (
+from anvil_release_qc.batch.gcs import read_gcs_text
+from anvil_release_qc.batch.terra import (
+    WORKFLOW_ABORTED,
+    WORKFLOW_FAILED,
     TerraWorkspaceClient,
     is_submission_terminal,
     submission_id,
     workflow_statuses,
-    WORKFLOW_ABORTED,
-    WORKFLOW_FAILED,
 )
+from anvil_release_qc.config import ResolvedTier
+from anvil_release_qc.logging_setup import LOGGER_NAME
 
 logger = logging.getLogger(LOGGER_NAME)
 

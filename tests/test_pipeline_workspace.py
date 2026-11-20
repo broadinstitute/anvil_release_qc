@@ -11,9 +11,9 @@ import types
 import pytest
 import requests
 
-from anvil_data_qc import pipeline
-from anvil_data_qc.pipeline import _create_workspace_resilient
-from anvil_data_qc.safety import SafetyError
+from anvil_release_qc import pipeline
+from anvil_release_qc.pipeline import _create_workspace_resilient
+from anvil_release_qc.safety import SafetyError
 
 
 def _http_error(status: int) -> requests.exceptions.HTTPError:

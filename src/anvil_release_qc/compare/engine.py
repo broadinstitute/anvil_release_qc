@@ -13,9 +13,14 @@ docs/comparison.md):
 
 from __future__ import annotations
 
-from .profile import ComparisonProfile
-from .report import ComparisonReport, CoverageReport, CoverageRow, TableComparison
-from .sources import TableShape, TabularDataSource
+from anvil_release_qc.compare.profile import ComparisonProfile
+from anvil_release_qc.compare.report import (
+    ComparisonReport,
+    CoverageReport,
+    CoverageRow,
+    TableComparison,
+)
+from anvil_release_qc.compare.sources import TableShape, TabularDataSource
 
 
 def compare_inventories(

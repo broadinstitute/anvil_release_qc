@@ -1,11 +1,11 @@
 """Command-line entrypoint (Typer).
 
-anvil-data-qc ade-qc --snapshot-id <id> [--tier dev|prod] [--catalog <cat>] [--dry-run] [--verify-auth] [--config path]
-anvil-data-qc tdr-qc --snapshot-id <id> [--tier dev|prod] [--dry-run] [--verify-auth] [--config path]
-anvil-data-qc compare --snapshot-id <id> --workspace-namespace <ns> --workspace-name <name> [...]
-anvil-data-qc compare-ingest --submitter-workspace-namespace <ns> --submitter-workspace-name <name> \
+anvil-release-qc ade-qc --snapshot-id <id> [--tier dev|prod] [--catalog <cat>] [--dry-run] [--verify-auth] [--config path]
+anvil-release-qc tdr-qc --snapshot-id <id> [--tier dev|prod] [--dry-run] [--verify-auth] [--config path]
+anvil-release-qc compare --snapshot-id <id> --workspace-namespace <ns> --workspace-name <name> [...]
+anvil-release-qc compare-ingest --submitter-workspace-namespace <ns> --submitter-workspace-name <name> \
     --snapshot-id <id> [--tier dev|prod] [--config path]
-anvil-data-qc azul-login [--tier dev|prod] [--config path] [--from-curl] [--no-open]
+anvil-release-qc azul-login [--tier dev|prod] [--config path] [--from-curl] [--no-open]
 """
 
 from __future__ import annotations
@@ -17,8 +17,8 @@ from typing import Optional
 
 import typer
 
-from .auth import assert_tier_identity, bearer_token, credentials_for_tier
-from .azul_auth import (
+from anvil_release_qc.auth import assert_tier_identity, bearer_token, credentials_for_tier
+from anvil_release_qc.azul_auth import (
     AzulReindexingError,
     AzulTokenError,
     expected_client_id,
@@ -26,14 +26,19 @@ from .azul_auth import (
     validate_azul_token,
     write_azul_token,
 )
-from .bigquery import BigQueryAccessError, check_bigquery_access, snapshot_data_volume
-from .clients.tdr import TdrClient, snapshot_bigquery_access
-from .compare.ingest import run_ingest_comparison
-from .compare.profile import TDR_SYSTEM_TABLES
-from .compare.qc import run_qc_comparison
-from .config import load_config, resolve_tier
-from .pipeline import run_ade_qc, run_tdr_qc
-from .safety import SafetyError
+from anvil_release_qc.bigquery import (
+    BigQueryAccessError,
+    check_bigquery_access,
+    snapshot_data_volume,
+)
+from anvil_release_qc.clients.tdr import SNAPSHOT_INCLUDE, snapshot_bigquery_access
+from anvil_release_qc.clients.toolkit import make_tdr
+from anvil_release_qc.compare.ingest import run_ingest_comparison
+from anvil_release_qc.compare.profile import TDR_SYSTEM_TABLES
+from anvil_release_qc.compare.qc import run_qc_comparison
+from anvil_release_qc.config import load_config, resolve_tier
+from anvil_release_qc.pipeline import run_ade_qc, run_tdr_qc
+from anvil_release_qc.safety import SafetyError
 
 app = typer.Typer(
     help="AnVIL Data Release QC: export a TDR snapshot to a Terra workspace and verify it.",
@@ -200,7 +205,11 @@ def compare(
 
     try:
         check_bigquery_access(creds, resolved.billing_google_project_id)
-        snapshot = TdrClient(resolved.url("tdr"), google_token).retrieve_snapshot(snapshot_id)
+        snapshot = (
+            make_tdr(resolved, google_token)
+            .get_snapshot_info(snapshot_id, info_to_include=SNAPSHOT_INCLUDE)
+            .json()
+        )
         bq_project, bq_dataset = snapshot_bigquery_access(snapshot)
         volume = snapshot_data_volume(
             creds,
@@ -268,7 +277,11 @@ def compare_ingest(
 
     try:
         check_bigquery_access(creds, resolved.billing_google_project_id)
-        snapshot = TdrClient(resolved.url("tdr"), google_token).retrieve_snapshot(snapshot_id)
+        snapshot = (
+            make_tdr(resolved, google_token)
+            .get_snapshot_info(snapshot_id, info_to_include=SNAPSHOT_INCLUDE)
+            .json()
+        )
         bq_project, bq_dataset = snapshot_bigquery_access(snapshot)
         report = run_ingest_comparison(
             creds=creds,

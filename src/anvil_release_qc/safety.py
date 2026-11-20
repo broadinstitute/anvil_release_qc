@@ -33,7 +33,7 @@ import logging
 from typing import Optional
 from urllib.parse import urlsplit
 
-from .logging_setup import LOGGER_NAME
+from anvil_release_qc.logging_setup import LOGGER_NAME
 
 logger = logging.getLogger(LOGGER_NAME)
 

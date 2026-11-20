@@ -3,20 +3,23 @@
 import logging
 
 import pytest
+import requests
 
-from anvil_data_qc.clients.azul import AzulClient
-from anvil_data_qc.clients.base import BaseClient
-from anvil_data_qc.clients.firecloud import FirecloudClient, import_job_id
-from anvil_data_qc.clients.rawls import workspace_auth_domains
-from anvil_data_qc.clients.tdr import (
-    TdrClient,
+from anvil_release_qc.clients.azul import AzulClient
+from anvil_release_qc.clients.base import BaseClient
+from anvil_release_qc.clients.firecloud import FirecloudClient, import_job_id
+from anvil_release_qc.clients.rawls import workspace_auth_domains
+from anvil_release_qc.clients.tdr import (
     export_job_id,
     export_manifest_url,
+    export_snapshot,
     snapshot_bigquery_access,
     snapshot_name,
+    wait_for_export_job,
 )
-from anvil_data_qc.logging_setup import LOGGER_NAME
-from anvil_data_qc.safety import BearerDestinationError, SignedUrl
+from anvil_release_qc.clients.toolkit import GuardedRunRequest
+from anvil_release_qc.logging_setup import LOGGER_NAME
+from anvil_release_qc.safety import BearerDestinationError, SignedUrl
 
 
 class _Resp:
@@ -64,7 +67,7 @@ def test_azul_request_pfb_manifest_polls_to_signed_url(monkeypatch):
         return next(responses)
 
     monkeypatch.setattr(client, "request", fake_request)
-    monkeypatch.setattr("anvil_data_qc.clients.azul.time.sleep", lambda _s: None)
+    monkeypatch.setattr("anvil_release_qc.clients.azul.time.sleep", lambda _s: None)
 
     signed = client.request_pfb_manifest("265ecd43-c88f-19e9-4da1-b6cd1d07a557")
     assert signed.reveal() == "https://s3.example/m.avro?X-Amz-Signature=zzz"  # SignedUrl wrapper
@@ -81,7 +84,7 @@ def test_azul_request_pfb_manifest_polls_to_signed_url(monkeypatch):
 def test_azul_poll_raises_on_unexpected_status(monkeypatch):
     client = AzulClient("https://azul.example", lambda: "token", catalog="anvil14")
     monkeypatch.setattr(client, "request", lambda *a, **k: _Resp({"Status": 500}))
-    monkeypatch.setattr("anvil_data_qc.clients.azul.time.sleep", lambda _s: None)
+    monkeypatch.setattr("anvil_release_qc.clients.azul.time.sleep", lambda _s: None)
     with pytest.raises(RuntimeError):
         client.request_pfb_manifest("ds")
 
@@ -93,7 +96,7 @@ def test_wait_for_import_succeeds(monkeypatch):
     client = FirecloudClient("https://fc.example", lambda: "token")
     statuses = iter([{"status": "ReadyForUpsert"}, {"status": "Upserting"}, {"status": "Done"}])
     monkeypatch.setattr(client, "get_import_job", lambda ns, n, jid: next(statuses))
-    monkeypatch.setattr("anvil_data_qc.clients.firecloud.time.sleep", lambda _s: None)
+    monkeypatch.setattr("anvil_release_qc.clients.firecloud.time.sleep", lambda _s: None)
     job = client.wait_for_import("ns", "ws", "job-1", poll_interval=0)
     assert job["status"] == "Done"
 
@@ -101,7 +104,7 @@ def test_wait_for_import_succeeds(monkeypatch):
 def test_wait_for_import_raises_on_error(monkeypatch):
     client = FirecloudClient("https://fc.example", lambda: "token")
     monkeypatch.setattr(client, "get_import_job", lambda ns, n, jid: {"status": "Error"})
-    monkeypatch.setattr("anvil_data_qc.clients.firecloud.time.sleep", lambda _s: None)
+    monkeypatch.setattr("anvil_release_qc.clients.firecloud.time.sleep", lambda _s: None)
     with pytest.raises(RuntimeError):
         client.wait_for_import("ns", "ws", "job-1", poll_interval=0)
 
@@ -160,48 +163,59 @@ def test_submit_import_job_tdrexport_options(monkeypatch):
 # --- TDR snapshot export (tdr-qc) ---
 
 
-def test_tdr_export_snapshot_params(monkeypatch):
-    client = TdrClient("https://tdr.example", lambda: "token")
-    calls = []
+class _FakeRequestUtil:
+    def __init__(self):
+        self.calls = []
 
-    def fake_request(method, path, **kwargs):
-        calls.append((method, path, kwargs.get("params")))
+    def run_request(self, uri, method, **kwargs):
+        self.calls.append((method, uri, kwargs.get("params")))
         return _Resp({"id": "job-1", "job_status": "running", "status_code": 202})
 
-    monkeypatch.setattr(client, "request", fake_request)
-    job = client.export_snapshot("snap-1")
+
+class _FakeTdr:
+    """Stand-in for the toolkit's TDR: replays get_job_status payloads."""
+
+    tdr_link = "https://tdr.example/api/repository/v1"
+
+    def __init__(self, statuses=()):
+        self.request_util = _FakeRequestUtil()
+        self._statuses = iter(statuses)
+
+    def get_job_status(self, job_id):
+        return _Resp(next(self._statuses))
+
+
+def test_tdr_export_snapshot_params():
+    tdr = _FakeTdr()
+    job = export_snapshot(tdr, "snap-1")
     assert export_job_id(job) == "job-1"
-    method, path, params = calls[0]
-    assert method == "GET" and path == "/api/repository/v1/snapshots/snap-1/export"
+    method, uri, params = tdr.request_util.calls[0]
+    assert method == "GET" and uri == "https://tdr.example/api/repository/v1/snapshots/snap-1/export"
     # Bools must be lowercase strings for TDR (not Python's "True"/"False").
     assert params == {"exportGsPaths": "false", "validatePrimaryKeyUniqueness": "true"}
 
 
 def test_tdr_wait_for_export_job_succeeds(monkeypatch):
-    client = TdrClient("https://tdr.example", lambda: "token")
-    statuses = iter(
+    tdr = _FakeTdr(
         [{"job_status": "running"}, {"job_status": "running"}, {"job_status": "succeeded"}]
     )
-    monkeypatch.setattr(client, "get_job", lambda jid: next(statuses))
-    monkeypatch.setattr("anvil_data_qc.clients.tdr.time.sleep", lambda _s: None)
-    job = client.wait_for_export_job("job-1", poll_interval=0)
+    monkeypatch.setattr("anvil_release_qc.clients.tdr.time.sleep", lambda _s: None)
+    job = wait_for_export_job(tdr, "job-1", poll_interval=0)
     assert job["job_status"] == "succeeded"
 
 
 def test_tdr_wait_for_export_job_raises_on_failure(monkeypatch):
-    client = TdrClient("https://tdr.example", lambda: "token")
-    monkeypatch.setattr(client, "get_job", lambda jid: {"job_status": "failed", "status_code": 500})
-    monkeypatch.setattr("anvil_data_qc.clients.tdr.time.sleep", lambda _s: None)
+    tdr = _FakeTdr([{"job_status": "failed", "status_code": 500}])
+    monkeypatch.setattr("anvil_release_qc.clients.tdr.time.sleep", lambda _s: None)
     with pytest.raises(RuntimeError) as excinfo:
-        client.wait_for_export_job("job-1", poll_interval=0)
+        wait_for_export_job(tdr, "job-1", poll_interval=0)
     # The error names the job + status but does NOT dump the whole payload (redaction discipline).
     assert "job-1" in str(excinfo.value) and "failed" in str(excinfo.value)
 
 
 def test_tdr_wait_for_export_job_polls_through_unknown_status(monkeypatch):
     # An unknown OR missing job_status is treated as still-in-progress (keep polling), not terminal.
-    client = TdrClient("https://tdr.example", lambda: "token")
-    statuses = iter(
+    tdr = _FakeTdr(
         [
             {"job_status": "queued"},  # unknown (not running/succeeded/failed)
             {},  # missing job_status entirely
@@ -209,37 +223,20 @@ def test_tdr_wait_for_export_job_polls_through_unknown_status(monkeypatch):
             {"job_status": "succeeded"},
         ]
     )
-    monkeypatch.setattr(client, "get_job", lambda jid: next(statuses))
-    monkeypatch.setattr("anvil_data_qc.clients.tdr.time.sleep", lambda _s: None)
-    job = client.wait_for_export_job("job-1", poll_interval=0)
+    monkeypatch.setattr("anvil_release_qc.clients.tdr.time.sleep", lambda _s: None)
+    job = wait_for_export_job(tdr, "job-1", poll_interval=0)
     assert job["job_status"] == "succeeded"  # polled through queued / missing / running
 
 
 def test_tdr_wait_for_export_job_times_out(monkeypatch):
     # A job that never reaches a terminal state raises TimeoutError once the deadline passes.
-    client = TdrClient("https://tdr.example", lambda: "token")
-    monkeypatch.setattr(client, "get_job", lambda jid: {"job_status": "running"})
-    monkeypatch.setattr("anvil_data_qc.clients.tdr.time.sleep", lambda _s: None)
+    tdr = _FakeTdr([{"job_status": "running"}] * 5)
+    monkeypatch.setattr("anvil_release_qc.clients.tdr.time.sleep", lambda _s: None)
     # deadline = monotonic() + max_wait = 100.0; the first in-loop check (200.0) is past it.
     ticks = iter([100.0, 200.0])
-    monkeypatch.setattr("anvil_data_qc.clients.tdr.time.monotonic", lambda: next(ticks))
+    monkeypatch.setattr("anvil_release_qc.clients.tdr.time.monotonic", lambda: next(ticks))
     with pytest.raises(TimeoutError):
-        client.wait_for_export_job("job-1", poll_interval=0, max_wait=0)
-
-
-def test_tdr_get_job_and_result_build_urls(monkeypatch):
-    client = TdrClient("https://tdr.example", lambda: "token")
-    captured = {}
-
-    def fake_request(method, path, **kwargs):
-        captured["method"], captured["path"] = method, path
-        return _Resp({"job_status": "running"})
-
-    monkeypatch.setattr(client, "request", fake_request)
-    client.get_job("job-xyz")
-    assert captured == {"method": "GET", "path": "/api/repository/v1/jobs/job-xyz"}
-    client.get_job_result("job-xyz")
-    assert captured["path"] == "/api/repository/v1/jobs/job-xyz/result"
+        wait_for_export_job(tdr, "job-1", poll_interval=0, max_wait=0)
 
 
 def test_export_job_id_missing_raises():
@@ -354,3 +351,81 @@ def test_bearer_refusal_is_logged(caplog):
             client.request("GET", "https://evil.example/x")
     assert "Refused to send a bearer token" in caplog.text
     assert "SECRETxyz123" not in caplog.text  # the token value is never in the audit log
+
+
+# --- toolkit adapters (GuardedRunRequest): the same pinning/redaction guarantees as BaseClient ---
+
+
+class _Http200Resp(_Http200):
+    text = ""
+
+
+def _guarded(monkeypatch, token="tok", base="https://good.example"):
+    seen = {}
+
+    def fake_request(method, uri, **kwargs):
+        seen.update(method=method, uri=uri, **kwargs)
+        return _Http200Resp()
+
+    monkeypatch.setattr("anvil_release_qc.clients.toolkit.requests.request", fake_request)
+    return GuardedRunRequest(lambda: token, base), seen
+
+
+def test_guarded_run_request_sends_token_to_pinned_host(monkeypatch):
+    rr, seen = _guarded(monkeypatch)
+    rr.run_request("https://good.example/api/x", "GET")
+    assert seen["headers"]["Authorization"] == "Bearer tok" and seen["timeout"] == 60
+
+
+def test_guarded_run_request_refuses_other_host_and_http(monkeypatch):
+    rr, seen = _guarded(monkeypatch)
+    with pytest.raises(BearerDestinationError):
+        rr.run_request("https://evil.example/x", "GET")
+    with pytest.raises(BearerDestinationError):
+        rr.run_request("http://good.example/x", "GET")
+    assert not seen  # nothing was sent
+
+
+def test_guarded_run_request_refusal_does_not_log_token(monkeypatch, caplog):
+    rr, _ = _guarded(monkeypatch, token="SECRETxyz123")
+    with caplog.at_level(logging.WARNING, logger=LOGGER_NAME):
+        with pytest.raises(BearerDestinationError):
+            rr.run_request("https://evil.example/x", "GET")
+    assert "SECRETxyz123" not in caplog.text
+
+
+def test_guarded_run_request_http_error_not_retried(monkeypatch):
+    class _Err403(_Http200Resp):
+        status_code = 403
+
+        def raise_for_status(self):
+            raise requests.HTTPError("403")
+
+    calls = []
+    monkeypatch.setattr(
+        "anvil_release_qc.clients.toolkit.requests.request",
+        lambda *a, **k: calls.append(1) or _Err403(),
+    )
+    rr = GuardedRunRequest(lambda: "t", "https://good.example")
+    with pytest.raises(requests.HTTPError):
+        rr.run_request("https://good.example/x", "GET")
+    assert len(calls) == 1  # no backoff/retry
+    rr.run_request("https://good.example/x", "GET", accept_return_codes=[403])  # tolerated code
+
+
+def test_make_tdr_and_workspace_hosts_match_tier_config():
+    from anvil_release_qc.clients.toolkit import make_tdr, make_terra_workspace
+    from anvil_release_qc.config import SERVICE_URLS, ResolvedTier
+
+    for name in SERVICE_URLS:
+        tier = ResolvedTier(
+            name=name,
+            email="a@b.c",
+            adc_credentials_file=None,
+            azul_token_file=None,
+            terra_billing_project="bp",
+            billing_google_project_id="gp",
+            service_urls=SERVICE_URLS[name],
+        )
+        make_tdr(tier, lambda: "t")  # raises if the toolkit's TDR host drifted from config
+        make_terra_workspace(tier, lambda: "t", "ns", "ws")

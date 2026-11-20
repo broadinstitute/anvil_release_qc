@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .base import BaseClient
+from anvil_release_qc.clients.base import BaseClient
 
 
 class RawlsClient(BaseClient):
@@ -47,14 +47,6 @@ class RawlsClient(BaseClient):
         return self.request(
             "GET", f"/api/workspaces/{namespace}/{name}", params=params, timeout=timeout
         ).json()
-
-    def entity_type_metadata(self, namespace: str, name: str) -> dict:
-        """GET /api/workspaces/{ns}/{name}/entities.
-
-        Returns ``{entityType: {"count": N, "attributeNames": [...], "idName": "..."}}`` -- the
-        structural overview used for the T1-T2 table comparison.
-        """
-        return self.request("GET", f"/api/workspaces/{namespace}/{name}/entities").json()
 
 
 def workspace_auth_domains(workspace: dict) -> list[str]:

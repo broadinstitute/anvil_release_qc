@@ -2,7 +2,7 @@ version 1.0
 
 # Ingestion QC: compare a submitter (ADSW) workspace's tables to the source TDR snapshot.
 #
-# Runs `anvil-data-qc compare-ingest` in the code-only anvil-data-qc Docker image. Credentials come
+# Runs `anvil-release-qc compare-ingest` in the code-only anvil-release-qc Docker image. Credentials come
 # from the ambient Terra runtime service account (ADC) -- its email must match the configured tier's
 # email (the CLI identity guard). The per-tier config is supplied as a File input (set
 # adc_credentials_file: null in it, so ADC falls back to that runtime identity). No Azul token needed.
@@ -18,7 +18,7 @@ workflow CompareIngest {
         String submitter_workspace_name
         String snapshot_id
         String? tier
-        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.3.5"
+        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-release-qc:0.3.5"
     }
 
     call compare_ingest {
@@ -46,7 +46,7 @@ workflow CompareIngest {
         submitter_workspace_name: "Submitter (ADSW) workspace name."
         snapshot_id: "TDR snapshot id (the system of record to compare against)."
         tier: "Tier (dev|prod). Optional; defaults to the config's default_tier."
-        docker: "anvil-data-qc image reference, e.g. <registry>/anvil-data-qc:<tag>."
+        docker: "anvil-release-qc image reference, e.g. <registry>/anvil-release-qc:<tag>."
     }
 }
 
@@ -76,7 +76,7 @@ task compare_ingest {
         # every path (the task always completes; the CLI exit code is captured, not fatal).
         date -u '+%Y-%m-%dT%H:%M:%SZ' > run_began.txt
         set +e
-        anvil-data-qc compare-ingest \
+        anvil-release-qc compare-ingest \
             --config "~{config}" \
             --submitter-workspace-namespace "~{submitter_workspace_namespace}" \
             --submitter-workspace-name "~{submitter_workspace_name}" \

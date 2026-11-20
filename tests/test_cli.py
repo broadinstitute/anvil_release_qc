@@ -2,8 +2,8 @@
 
 from typer.testing import CliRunner
 
-from anvil_data_qc import cli
-from anvil_data_qc.azul_auth import AzulReindexingError
+from anvil_release_qc import cli
+from anvil_release_qc.azul_auth import AzulReindexingError
 
 runner = CliRunner()
 

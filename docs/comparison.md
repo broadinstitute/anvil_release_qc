@@ -108,7 +108,7 @@ the import) — the comparison engine is identical regardless of how the workspa
 **existing** workspace without re-importing:
 
 ```bash
-anvil-data-qc compare \
+anvil-release-qc compare \
   --snapshot-id <tdr-snapshot-id> \
   --workspace-namespace <terra-billing-project> \
   --workspace-name <workspace-name> \
@@ -140,7 +140,7 @@ correct as the FSS schema grows). There is **no PFB export** in this flow — no
 consent gate; it reads table/row counts only.
 
 ```bash
-anvil-data-qc compare-ingest \
+anvil-release-qc compare-ingest \
   --submitter-workspace-namespace <terra-billing-project> \
   --submitter-workspace-name <submitter-workspace-name> \
   --snapshot-id <tdr-snapshot-id> \

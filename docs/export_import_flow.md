@@ -19,7 +19,7 @@ automation mirrors. Endpoints and per-tier URLs: [`services.md`](services.md).
 > **Safety gate — open-access by default; controlled-access via opt-in.** By default this pipeline
 > proceeds only when the snapshot's top-level `consentCode` is exactly `NRES`; any other value —
 > including empty/unknown — is **blocked before any PFB signed URL is generated** (a controlled-access
-> signed URL is highly sensitive — see risk **R8** and `src/anvil_data_qc/safety.py`). Controlled-access
+> signed URL is highly sensitive — see risk **R8** and `src/anvil_release_qc/safety.py`). Controlled-access
 > is **security-team approved** (2026-06, all AnVIL data) and enabled by the explicit, default-off
 > `--allow-controlled-access` opt-in (`safety.assert_consent_permitted`); it additionally requires an
 > Azul token (see [Authentication](#authentication)). Layers 2–4 apply on every run.
@@ -75,7 +75,7 @@ Two **distinct** credentials are needed — a single token does *not* satisfy ev
     **non-refreshable**, but is used only in the **short** Azul phase (minutes); the long import phase
     rides the refreshable gcloud token.
 
-**`azul-login` helper + pre-run gate.** `anvil-data-qc azul-login --tier <t>` opens the Azul Swagger
+**`azul-login` helper + pre-run gate.** `anvil-release-qc azul-login --tier <t>` opens the Azul Swagger
 UI, you sign in and copy the token, and it is validated via Google `tokeninfo` (**the same check Azul
 runs** — `azp`, account email, expiry) and written to the tier's `azul_token_file`. Before each run
 the pipeline re-validates that token and **fails fast** if it is wrong-client / wrong-account / near

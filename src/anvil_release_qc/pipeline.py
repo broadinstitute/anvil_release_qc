@@ -28,9 +28,9 @@ from urllib.parse import urlsplit
 import requests
 from google.auth.credentials import Credentials
 
-from . import __version__
-from .auth import assert_tier_identity, bearer_token, credentials_for_tier
-from .azul_auth import (
+from anvil_release_qc import __version__
+from anvil_release_qc.auth import assert_tier_identity, bearer_token, credentials_for_tier
+from anvil_release_qc.azul_auth import (
     MIN_TOKEN_SECONDS_FOR_RUN,
     AzulReindexingError,
     assert_azul_not_reindexing,
@@ -38,23 +38,28 @@ from .azul_auth import (
     read_azul_token,
     validate_azul_token,
 )
-from .bigquery import check_bigquery_access, resolve_dataset_id, snapshot_data_volume
-from .clients.azul import AzulClient
-from .clients.firecloud import FirecloudClient, import_job_id
-from .clients.rawls import RawlsClient, workspace_auth_domains
-from .clients.tdr import (
-    TdrClient,
+from anvil_release_qc.bigquery import (
+    check_bigquery_access,
+    resolve_dataset_id,
+    snapshot_data_volume,
+)
+from anvil_release_qc.clients.azul import AzulClient
+from anvil_release_qc.clients.firecloud import FirecloudClient, import_job_id
+from anvil_release_qc.clients.rawls import RawlsClient, workspace_auth_domains
+from anvil_release_qc.clients.tdr import (
+    SNAPSHOT_INCLUDE,
     export_job_id,
     export_manifest_url,
+    export_snapshot,
     snapshot_bigquery_access,
-    snapshot_consent_code,
-    snapshot_name,
+    wait_for_export_job,
 )
-from .compare.profile import TDR_SYSTEM_TABLES
-from .compare.qc import run_qc_comparison
-from .config import SERVICE_URLS, ResolvedTier, load_config, resolve_tier
-from .logging_setup import LOGGER_NAME, setup_logging, write_header
-from .safety import (
+from anvil_release_qc.clients.toolkit import make_tdr
+from anvil_release_qc.compare.profile import TDR_SYSTEM_TABLES
+from anvil_release_qc.compare.qc import run_qc_comparison
+from anvil_release_qc.config import SERVICE_URLS, ResolvedTier, load_config, resolve_tier
+from anvil_release_qc.logging_setup import LOGGER_NAME, log_run_start, setup_logging
+from anvil_release_qc.safety import (
     SIGNED_URL_ALLOWED_PREFIXES,
     ControlledAccessNotApprovedError,
     SafetyError,
@@ -64,8 +69,8 @@ from .safety import (
     tdr_export_allowed_prefixes,
     verify_pfb_handoff,
 )
-from .timing import log_stage_summary, stage_timer
-from .workspace import ADE_NAME_INFIX, TDR_NAME_INFIX, workspace_name
+from anvil_release_qc.timing import log_stage_summary, stage_timer
+from anvil_release_qc.workspace import ADE_NAME_INFIX, TDR_NAME_INFIX, workspace_name
 
 logger = logging.getLogger(LOGGER_NAME)
 
@@ -200,7 +205,7 @@ def _setup_run(
     tier = resolve_tier(config, tier_name)
 
     _logger, log_file = setup_logging(log_dir, tier.name, snapshot_id)
-    write_header(
+    log_run_start(
         _logger,
         version=__version__,
         tier=tier.name,
@@ -391,7 +396,7 @@ def run_ade_qc(
     if azul_token is None:
         logger.info(
             "No Azul token configured (azul_token_file unset/empty); calling Azul without a token "
-            "(open-access only). Run `anvil-data-qc azul-login` for controlled-access datasets."
+            "(open-access only). Run `anvil-release-qc azul-login` for controlled-access datasets."
         )
     else:
         info = validate_azul_token(
@@ -407,16 +412,16 @@ def run_ade_qc(
         )
 
     # 1. TDR: retrieve the snapshot (name + BigQuery access info).
-    tdr = TdrClient(tier.url("tdr"), google_token)
-    snapshot = tdr.retrieve_snapshot(snapshot_id)
-    name = snapshot_name(snapshot)
+    tdr = make_tdr(tier, google_token)
+    snapshot = tdr.get_snapshot_info(snapshot_id, info_to_include=SNAPSHOT_INCLUDE).json()
+    name = snapshot.get("name")
 
     # SAFETY GATE (layer 1): only explicitly open-access snapshots proceed UNLESS controlled-access was
     # explicitly authorized for this run (allow_controlled_access). The Azul PFB signed URL grants direct
     # access to an NIH study's controlled-access data; mishandling it (e.g. a prod URL into the insecure
     # dev tier) is a Federal Data Management Incident. Controlled-access is security-team approved but
     # gated behind the explicit opt-in; layers 2-4 (containment, hand-off, bearer-pin) apply regardless.
-    consent_code = snapshot_consent_code(snapshot)
+    consent_code = snapshot.get("consentCode")
     try:
         assert_consent_permitted(
             snapshot_id, consent_code, allow_controlled_access=allow_controlled_access
@@ -433,7 +438,7 @@ def run_ade_qc(
     elif azul_token is None:
         exc = SafetyError(
             f"Snapshot {snapshot_id} is controlled-access (consentCode={consent_code!r}) but no Azul "
-            "token is available; controlled-access data requires a token (run `anvil-data-qc "
+            "token is available; controlled-access data requires a token (run `anvil-release-qc "
             "azul-login` or pass --azul-token-file). Aborting before any signed URL is generated."
         )
         logger.error("%s", exc)
@@ -564,9 +569,9 @@ def run_tdr_qc(
     google_token = setup.google_token
 
     # 1. TDR: retrieve the snapshot (name, consentCode, BigQuery access info).
-    tdr = TdrClient(tier.url("tdr"), google_token)
-    snapshot = tdr.retrieve_snapshot(snapshot_id)
-    name = snapshot_name(snapshot)
+    tdr = make_tdr(tier, google_token)
+    snapshot = tdr.get_snapshot_info(snapshot_id, info_to_include=SNAPSHOT_INCLUDE).json()
+    name = snapshot.get("name")
 
     # SAFETY GATE (layer 1): only explicitly open-access snapshots proceed UNLESS controlled-access was
     # explicitly authorized for this run (allow_controlled_access). The TDR export signed URL grants
@@ -576,7 +581,7 @@ def run_tdr_qc(
     # credentials must already grant access to the controlled data (TDR /export 403s otherwise), and the
     # import applies the snapshot's auth domain to the workspace independently of tdrSyncPermissions
     # (verified post-import by the QC auth-domain check). Runs before any export/signed URL is generated.
-    consent_code = snapshot_consent_code(snapshot)
+    consent_code = snapshot.get("consentCode")
     try:
         assert_consent_permitted(
             snapshot_id, consent_code, allow_controlled_access=allow_controlled_access
@@ -623,11 +628,11 @@ def run_tdr_qc(
     # 2-3. TDR: export the snapshot (async) and obtain the signed manifest.json URL.
     durations: dict[str, float] = {}
     with stage_timer("tdr_export", durations):
-        job = tdr.export_snapshot(snapshot_id)
+        job = export_snapshot(tdr, snapshot_id)
         job_id = export_job_id(job)
         logger.info("TDR export job submitted: %s", job_id)
-        tdr.wait_for_export_job(job_id)
-        signed_url = export_manifest_url(tdr.get_job_result(job_id))
+        wait_for_export_job(tdr, job_id)
+        signed_url = export_manifest_url(tdr.get_job_result(job_id).json())
 
     if dry_run:
         location = signed_url.location  # scheme+host+path only; the signed query stays contained

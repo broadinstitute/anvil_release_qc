@@ -2,7 +2,7 @@ version 1.0
 
 # Release QC (standalone): compare an existing Analysis Workspace's data tables to the source TDR
 # snapshot (table parity + row/column counts + auth-domain), without re-importing. Runs
-# `anvil-data-qc compare` -- useful to re-QC a workspace a prior `qc` run created.
+# `anvil-release-qc compare` -- useful to re-QC a workspace a prior `qc` run created.
 #
 # Credentials: the ambient Terra runtime service account (ADC), whose email must match the configured
 # tier email (the CLI identity guard); config supplied as a File input. The task always succeeds and
@@ -15,7 +15,7 @@ workflow Compare {
         String workspace_name
         String snapshot_id
         String? tier
-        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.3.5"
+        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-release-qc:0.3.5"
     }
 
     call compare {
@@ -46,7 +46,7 @@ workflow Compare {
         workspace_name: "Analysis Workspace name."
         snapshot_id: "TDR snapshot id (the source of truth)."
         tier: "Tier (dev|prod). Optional; defaults to the config's default_tier."
-        docker: "anvil-data-qc image reference, e.g. <registry>/anvil-data-qc:<tag>."
+        docker: "anvil-release-qc image reference, e.g. <registry>/anvil-release-qc:<tag>."
     }
 }
 
@@ -75,7 +75,7 @@ task compare {
         # every path (the task always completes; the CLI exit code is captured, not fatal).
         date -u '+%Y-%m-%dT%H:%M:%SZ' > run_began.txt
         set +e
-        anvil-data-qc compare \
+        anvil-release-qc compare \
             --config "~{config}" \
             --snapshot-id "~{snapshot_id}" \
             --workspace-namespace "~{workspace_namespace}" \

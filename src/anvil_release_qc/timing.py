@@ -15,7 +15,7 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 
-from .logging_setup import LOGGER_NAME
+from anvil_release_qc.logging_setup import LOGGER_NAME
 
 logger = logging.getLogger(LOGGER_NAME)
 

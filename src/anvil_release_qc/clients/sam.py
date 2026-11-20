@@ -6,7 +6,7 @@ matches it. See docs/export_import_flow.md section 6.
 
 from __future__ import annotations
 
-from .base import BaseClient
+from anvil_release_qc.clients.base import BaseClient
 
 
 class SamClient(BaseClient):

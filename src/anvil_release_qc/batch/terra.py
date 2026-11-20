@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from ..clients.base import BaseClient
+from anvil_release_qc.clients.base import BaseClient
 
 # Submission-level status (SubmissionStatus): terminal states end a submission.
 SUBMISSION_TERMINAL = frozenset({"Done", "Aborted"})

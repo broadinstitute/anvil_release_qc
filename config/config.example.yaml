@@ -1,10 +1,10 @@
-# anvil-data-qc configuration — EXAMPLE / TEMPLATE.
+# anvil-release-qc configuration — EXAMPLE / TEMPLATE.
 #
 # Copy this to config/config.yaml (which is gitignored) and fill in your own values:
 #     cp config/config.example.yaml config/config.yaml
 #
 # Only per-developer settings live here. The shared, non-secret service URLs are baked into the
-# package (see src/anvil_data_qc/config.py, mirroring docs/services.md), so you do not list them.
+# package (see src/anvil_release_qc/config.py, mirroring docs/services.md), so you do not list them.
 
 default_tier: dev
 
@@ -24,7 +24,7 @@ tiers:
     #   gcloud auth application-default login        # signed in as the dev account
     # then copy ~/.config/gcloud/application_default_credentials.json to this path.
     # Omit (or set null) to use the ambient runtime identity (e.g. in a Terra workflow).
-    adc_credentials_file: ~/.config/anvil-data-qc/adc-dev.json
+    adc_credentials_file: ~/.config/anvil-release-qc/adc-dev.json
     # Terra billing project = the workspace namespace that ade-qc/tdr-qc create workspaces under.
     terra_billing_project: your-dev-billing-project
     # Google Cloud Project ID to run/bill Google Cloud operations against -- BigQuery jobs now, and
@@ -35,7 +35,7 @@ tiers:
     # Optional: the existing shared QC workspace that `qc-batch-runner` submits into (only that tool uses
     # it; it also accepts a --qc-workspace-name CLI override). Not needed by ade-qc/tdr-qc/compare.
     # qc_workspace_name: anvil-data-qc-shared
-    # Azul access-token file (gitignored). Populate it with:  anvil-data-qc azul-login --tier dev
+    # Azul access-token file (gitignored). Populate it with:  anvil-release-qc azul-login --tier dev
     # Azul needs a token issued to its own OAuth client; a plain gcloud ADC token is rejected.
     azul_token_file: secrets/azul-token-dev.txt
     # Optional: the Azul OAuth client id a token must carry (azp). Auto-discovered from Azul if unset.
@@ -43,7 +43,7 @@ tiers:
 
   prod:
     email: you@example.org
-    adc_credentials_file: ~/.config/anvil-data-qc/adc-prod.json
+    adc_credentials_file: ~/.config/anvil-release-qc/adc-prod.json
     terra_billing_project: your-prod-billing-project
     billing_google_project_id: terra-xxxxxxxx
     # qc_workspace_name: anvil-data-qc-shared   # for qc-batch-runner (optional; CLI can override)

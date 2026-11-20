@@ -1,9 +1,9 @@
-"""Tests for Azul access-token handling (anvil_data_qc.azul_auth), no network."""
+"""Tests for Azul access-token handling (anvil_release_qc.azul_auth), no network."""
 
 import pytest
 
-from anvil_data_qc import azul_auth
-from anvil_data_qc.azul_auth import (
+from anvil_release_qc import azul_auth
+from anvil_release_qc.azul_auth import (
     AzulReindexingError,
     AzulTokenError,
     assert_azul_not_reindexing,
@@ -16,7 +16,7 @@ from anvil_data_qc.azul_auth import (
     validate_azul_token,
     write_azul_token,
 )
-from anvil_data_qc.config import ResolvedTier
+from anvil_release_qc.config import ResolvedTier
 
 _CLIENT_ID = "111-abcDEF.apps.googleusercontent.com"
 _EMAIL = "dev-user@test.firecloud.org"

@@ -29,8 +29,8 @@ from typing import Collection, Optional
 
 import requests
 
-from .config import ResolvedTier
-from .logging_setup import LOGGER_NAME
+from anvil_release_qc.config import ResolvedTier
+from anvil_release_qc.logging_setup import LOGGER_NAME
 
 logger = logging.getLogger(LOGGER_NAME)
 
@@ -174,7 +174,7 @@ def validate_azul_token(
         raise AzulTokenError(
             f"Token's azp '{azp}' does not match Azul's OAuth client '{expected_azp}'. "
             "Azul will reject it — copy the token from the Azul Swagger UI (it must be issued to "
-            "Azul's own client), e.g. via `anvil-data-qc azul-login`."
+            "Azul's own client), e.g. via `anvil-release-qc azul-login`."
         )
     if allowed_emails is not None:
         token_email = (info.get("email") or "").lower()
@@ -188,7 +188,7 @@ def validate_azul_token(
     if remaining <= min_remaining_seconds:
         raise AzulTokenError(
             f"Azul token expires in {remaining}s (need > {min_remaining_seconds}s). "
-            "Refresh it with `anvil-data-qc azul-login`."
+            "Refresh it with `anvil-release-qc azul-login`."
         )
     return info
 
@@ -241,7 +241,7 @@ def read_azul_token(tier: ResolvedTier, *, override_path: Optional[str] = None) 
     path = Path(token_file).expanduser()
     if not path.exists():
         raise FileNotFoundError(
-            f"Azul token file not found: {path}. Run `anvil-data-qc azul-login`."
+            f"Azul token file not found: {path}. Run `anvil-release-qc azul-login`."
         )
     return token_from_file_text(path.read_text())  # present but empty / only comments -> None
 
@@ -261,7 +261,7 @@ def write_azul_token(tier: ResolvedTier, token: str, info: dict) -> Path:
         f"# account: {info.get('email')}   azp: {info.get('azp')}\n"
         f"# acquired: {now.isoformat(timespec='seconds')}   "
         f"expires: {expires.isoformat(timespec='seconds')}\n"
-        f"# refresh with:  anvil-data-qc azul-login --tier {tier.name}\n"
+        f"# refresh with:  anvil-release-qc azul-login --tier {tier.name}\n"
     )
     path.write_text(header + token + "\n")
     path.chmod(0o600)

@@ -1,9 +1,9 @@
-"""Tests for the controlled-access safety gate (anvil_data_qc.safety) — fail-closed behavior."""
+"""Tests for the controlled-access safety gate (anvil_release_qc.safety) — fail-closed behavior."""
 
 import pytest
 
-from anvil_data_qc.clients.tdr import snapshot_consent_code
-from anvil_data_qc.safety import (
+from anvil_release_qc.clients.tdr import snapshot_consent_code
+from anvil_release_qc.safety import (
     ControlledAccessNotApprovedError,
     SignedUrl,
     SignedUrlProvenanceError,

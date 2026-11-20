@@ -1,4 +1,4 @@
-# anvil-data-qc -- automated QC of AnVIL data releases, run non-interactively.
+# anvil-release-qc -- automated QC of AnVIL data releases, run non-interactively.
 #
 # The image is CODE-ONLY -- it contains no config and no secrets. Everything sensitive is provided at
 # run time, never baked in:
@@ -7,13 +7,13 @@
 #   - Local:     mount config / ADC / Azul token via -v and point --config and
 #                GOOGLE_APPLICATION_CREDENTIALS at them.
 #
-# Build:  docker build -t anvil-data-qc:dev .
-# Run:    docker run --rm anvil-data-qc:dev --help
+# Build:  docker build -t anvil-release-qc:dev .
+# Run:    docker run --rm anvil-release-qc:dev --help
 FROM python:3.13-slim-bookworm
 
-LABEL org.opencontainers.image.title="anvil-data-qc" \
+LABEL org.opencontainers.image.title="anvil-release-qc" \
       org.opencontainers.image.description="Automated QC of AnVIL data releases" \
-      org.opencontainers.image.source="https://github.com/mbaumann-broad/anvil-data-qc"
+      org.opencontainers.image.source="https://github.com/broadinstitute/anvil_release_qc"
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \
@@ -23,8 +23,14 @@ ENV PYTHONUNBUFFERED=1 \
 WORKDIR /app
 
 # 1) Pinned runtime dependencies first, so the large dependency layer is cached across code changes.
+#    requirements.txt includes pyops-service-toolkit as a git dependency, so git is needed at install time
+#    only (removed in the same layer to keep the image small).
 COPY requirements.txt ./
-RUN pip install --requirement requirements.txt
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends git \
+    && pip install --requirement requirements.txt \
+    && apt-get purge -y --auto-remove git \
+    && rm -rf /var/lib/apt/lists/*
 
 # 2) The package itself. Its dependencies are already pinned and installed above, so --no-deps avoids
 #    re-resolving them (the build reads pyproject.toml + README.md + LICENSE).
@@ -37,5 +43,5 @@ RUN pip install --no-deps .
 # fails with: ln: failed to create symbolic link '/cromwell_root': Permission denied. The image is
 # ephemeral, runs in a per-task isolated VM, and carries no secrets (see the header).
 
-ENTRYPOINT ["anvil-data-qc"]
+ENTRYPOINT ["anvil-release-qc"]
 CMD ["--help"]

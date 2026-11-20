@@ -138,7 +138,7 @@ tabular data**. Mishandling it — e.g. importing a **production** signed URL in
 tier**, or any unintended destination — would be a **Federal Data Management Incident**. As a
 long-lived, multi-operator tool, human/config error over time is a real risk even when the current
 code is correct.
-**Mitigation (2026-06-14):** four defense-in-depth layers in `src/anvil_data_qc/safety.py`.
+**Mitigation (2026-06-14):** four defense-in-depth layers in `src/anvil_release_qc/safety.py`.
 (1) **Consent gate** — by default the pipeline proceeds only when the snapshot's top-level
 `consentCode` is exactly `"NRES"`; empty/unknown/any other value is blocked, in every tier, **before
 any signed URL is generated**. (2) **Containment** — the signed URL is wrapped in a redacting

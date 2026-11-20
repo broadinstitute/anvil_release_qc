@@ -9,7 +9,7 @@ list via the Terra submissions API, capped at a small concurrency.
 
 Reuses the repo's config, identity guard, Azul-token validation, logging, and redaction. The per-dataset
 QC verdicts land in the data-table columns as usual; this tool orchestrates and reports. Deliberately a
-separate tool/CLI from ``anvil-data-qc`` (a distinct layer). Kept Python 3.10-compatible.
+separate tool/CLI from ``anvil-release-qc`` (a distinct layer). Kept Python 3.10-compatible.
 """
 
 from __future__ import annotations
@@ -23,11 +23,14 @@ import requests
 import typer
 from google.auth.exceptions import DefaultCredentialsError, RefreshError
 
-from .. import __version__
-from ..auth import IdentityMismatchError, assert_tier_identity, bearer_token, credentials_for_tier
-from ..config import load_config, resolve_tier
-from ..logging_setup import LOGGER_NAME, setup_logging, write_header
-from .runner import (
+from anvil_release_qc import __version__
+from anvil_release_qc.auth import (
+    IdentityMismatchError,
+    assert_tier_identity,
+    bearer_token,
+    credentials_for_tier,
+)
+from anvil_release_qc.batch.runner import (
     DEFAULT_MAX_CONCURRENT,
     PIPELINE_METHOD_CONFIG,
     BatchParams,
@@ -35,7 +38,9 @@ from .runner import (
     run_batch,
     run_verify_auth,
 )
-from .terra import TerraWorkspaceClient
+from anvil_release_qc.batch.terra import TerraWorkspaceClient
+from anvil_release_qc.config import load_config, resolve_tier
+from anvil_release_qc.logging_setup import LOGGER_NAME, log_run_start, setup_logging
 
 logger = logging.getLogger(LOGGER_NAME)
 
@@ -157,7 +162,7 @@ def main(
 
     _logger, log_file = setup_logging(Path("logs"), resolved.name, f"batch-{pipeline}")
     snapshot_ids = [] if verify_auth else _read_snapshot_ids(snapshots)
-    write_header(
+    log_run_start(
         _logger,
         version=__version__,
         tool="qc-batch-runner",

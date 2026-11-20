@@ -2,7 +2,7 @@
 
 Used by both QC flows:
 
-- ``retrieve_snapshot`` -- the snapshot's name, ``consentCode``, and BigQuery access info (project +
+- the toolkit's ``TDR.get_snapshot_info`` -- the snapshot's name, ``consentCode``, and BigQuery access info (project +
   dataset) for the ``anvil_dataset`` query and the table comparison. Shared by ade-qc and tdr-qc.
 - the **tdr-qc direct export** -- start an async snapshot export, poll the TDR job, read the result,
   and obtain the signed ``manifest.json`` URL the Terra import consumes. See docs/tdr_export_flow.md:
@@ -12,7 +12,7 @@ Used by both QC flows:
     GET /api/repository/v1/jobs/{jobId}          (poll) -> job_status running/succeeded/failed
     GET /api/repository/v1/jobs/{jobId}/result   -> {..., "format": {"parquet": {"manifest": <signed gs url>}}}
 
-``retrieve_snapshot``'s shape is from the TDR OpenAPI spec (confirmed on the dev open-access run); the
+the snapshot response's shape is from the TDR OpenAPI spec (confirmed on the dev open-access run); the
 export flow is from real captured traffic (docs/tdr_export_flow.md), validated end-to-end on prod 1000G.
 """
 
@@ -22,9 +22,11 @@ import logging
 import time
 from typing import Optional
 
-from ..logging_setup import LOGGER_NAME
-from ..safety import SignedUrl
-from .base import BaseClient
+from ops_utils.request_util import GET
+from ops_utils.tdr_utils.tdr_api_utils import TDR
+
+from anvil_release_qc.logging_setup import LOGGER_NAME
+from anvil_release_qc.safety import SignedUrl
 
 logger = logging.getLogger(LOGGER_NAME)
 
@@ -41,74 +43,64 @@ JOB_SUCCESS = "succeeded"
 JOB_FAILURE = "failed"
 
 
-class TdrClient(BaseClient):
-    def retrieve_snapshot(self, snapshot_id: str) -> dict:
-        """GET the snapshot with access information included."""
-        return self.request(
-            "GET",
-            f"/api/repository/v1/snapshots/{snapshot_id}",
-            params={"include": ["ACCESS_INFORMATION", "SOURCES", "PROPERTIES"]},
-        ).json()
+#: ``include`` sections passed to the toolkit's ``TDR.get_snapshot_info`` (access info -> BigQuery location).
+SNAPSHOT_INCLUDE = ["ACCESS_INFORMATION", "SOURCES", "PROPERTIES"]
 
-    def export_snapshot(
-        self,
-        snapshot_id: str,
-        *,
-        export_gs_paths: bool = EXPORT_GS_PATHS,
-        validate_primary_key_uniqueness: bool = VALIDATE_PRIMARY_KEY_UNIQUENESS,
-    ) -> dict:
-        """Start an async snapshot export; returns the TDR job (poll with ``wait_for_export_job``)."""
-        return self.request(
-            "GET",
-            f"/api/repository/v1/snapshots/{snapshot_id}/export",
-            # requests renders Python bools as "True"/"False"; TDR expects lowercase.
-            params={
-                "exportGsPaths": str(export_gs_paths).lower(),
-                "validatePrimaryKeyUniqueness": str(validate_primary_key_uniqueness).lower(),
-            },
-        ).json()
 
-    def get_job(self, job_id: str) -> dict:
-        """GET a TDR async job's status (``job_status``: running/succeeded/failed)."""
-        return self.request("GET", f"/api/repository/v1/jobs/{job_id}").json()
+def export_snapshot(
+    tdr: TDR,
+    snapshot_id: str,
+    *,
+    export_gs_paths: bool = EXPORT_GS_PATHS,
+    validate_primary_key_uniqueness: bool = VALIDATE_PRIMARY_KEY_UNIQUENESS,
+) -> dict:
+    """Start an async snapshot export; returns the TDR job (poll with ``wait_for_export_job``).
 
-    def get_job_result(self, job_id: str) -> dict:
-        """GET a completed TDR job's result payload."""
-        return self.request("GET", f"/api/repository/v1/jobs/{job_id}/result").json()
+    Custom: the toolkit's ``TDR`` has no snapshot-export call, so this uses its transport directly.
+    """
+    return tdr.request_util.run_request(
+        uri=f"{tdr.tdr_link}/snapshots/{snapshot_id}/export",
+        method=GET,
+        # requests renders Python bools as "True"/"False"; TDR expects lowercase.
+        params={
+            "exportGsPaths": str(export_gs_paths).lower(),
+            "validatePrimaryKeyUniqueness": str(validate_primary_key_uniqueness).lower(),
+        },
+    ).json()
 
-    def wait_for_export_job(
-        self, job_id: str, poll_interval: float = 10.0, max_wait: float = 7200.0
-    ) -> dict:
-        """Poll a TDR export job until it succeeds; raise on failure or timeout.
 
-        Large snapshots (the reason tdr-qc exists) can take a while to export, so ``max_wait`` matches
-        the import budget (2h). Any non-terminal status -- including an unknown/missing one -- keeps
-        polling (treated as still-in-progress) until a terminal state or the deadline.
-        """
-        deadline = time.monotonic() + max_wait
-        while True:
-            job = self.get_job(job_id)
-            status = job.get("job_status")
-            logger.info("TDR export job %s: job_status=%s", job_id, status)
-            if status == JOB_SUCCESS:
-                return job
-            if status == JOB_FAILURE:
-                # Surface job_id + status only (not the whole payload) -- the status payload has no
-                # signed URLs, but keep the redaction discipline of the rest of the flow.
-                raise RuntimeError(
-                    f"TDR export job {job_id} failed (job_status={status!r}, "
-                    f"status_code={job.get('status_code')!r})."
-                )
-            if time.monotonic() > deadline:
-                raise TimeoutError(f"TDR export job {job_id} did not finish within {max_wait}s.")
-            time.sleep(poll_interval)
+def wait_for_export_job(
+    tdr: TDR, job_id: str, poll_interval: float = 10.0, max_wait: float = 7200.0
+) -> dict:
+    """Poll a TDR export job until it succeeds; raise on failure or timeout.
 
+    Large snapshots (the reason tdr-qc exists) can take a while to export, so ``max_wait`` matches
+    the import budget (2h). Any non-terminal status -- including an unknown/missing one -- keeps
+    polling (treated as still-in-progress) until a terminal state or the deadline.
+    """
+    deadline = time.monotonic() + max_wait
+    while True:
+        job = tdr.get_job_status(job_id).json()
+        status = job.get("job_status")
+        logger.info("TDR export job %s: job_status=%s", job_id, status)
+        if status == JOB_SUCCESS:
+            return job
+        if status == JOB_FAILURE:
+            # Surface job_id + status only (not the whole payload) -- the status payload has no
+            # signed URLs, but keep the redaction discipline of the rest of the flow.
+            raise RuntimeError(
+                f"TDR export job {job_id} failed (job_status={status!r}, "
+                f"status_code={job.get('status_code')!r})."
+            )
+        if time.monotonic() > deadline:
+            raise TimeoutError(f"TDR export job {job_id} did not finish within {max_wait}s.")
+        time.sleep(poll_interval)
 
 def snapshot_consent_code(snapshot: dict) -> Optional[str]:
     """The snapshot's top-level ``consentCode``.
 
     ``"NRES"`` (No Restrictions) means open-access; anything else -- including empty or missing -- is
-    controlled-access or unknown. Used by the safety gate (see ``anvil_data_qc.safety``).
+    controlled-access or unknown. Used by the safety gate (see ``anvil_release_qc.safety``).
     """
     return snapshot.get("consentCode")
 
@@ -146,7 +138,7 @@ def export_manifest_url(result: dict) -> SignedUrl:
     The Terra import consumes ``format.parquet.manifest`` (a signed GCS URL to the export's
     ``manifest.json``). The result also carries per-table parquet signed URLs
     (``format.parquet.location.tables[].paths``) that this flow does not use. The manifest is wrapped
-    in :class:`~anvil_data_qc.safety.SignedUrl` -- a redacting holder; unwrap it only at the import
+    in :class:`~anvil_release_qc.safety.SignedUrl` -- a redacting holder; unwrap it only at the import
     hand-off. Do not log the raw ``result`` (it is full of signed URLs).
     """
     parquet = ((result or {}).get("format") or {}).get("parquet") or {}
