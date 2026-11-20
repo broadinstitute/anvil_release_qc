@@ -54,7 +54,7 @@ workflow AdeQc {
         catalog: "Azul catalog (e.g. anvil15 in prod). Omit in dev."
         dry_run: "Validate the export side only (TDR -> BigQuery -> Azul); create no workspace, no import."
         allow_controlled_access: "Opt in to controlled-access snapshots (any consentCode). Default false = open-access only."
-        keep_workspace: "Keep the created QC workspace even when QC passes. Default false = it is deleted after a passing QC (always retained on a QC failure or failed import).",
+        keep_workspace: "Keep the created QC workspace even when QC passes. Default false = it is deleted after a passing QC (always retained on a QC failure or failed import)."
         azul_token: "Azul token file (secure bucket) for controlled-access; required when allow_controlled_access=true."
         docker: "anvil-release-qc image reference, e.g. <registry>/anvil-release-qc:<tag>."
     }
