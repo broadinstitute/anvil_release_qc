@@ -32,7 +32,7 @@ beautifulsoup4==4.15.0
     # via atlassian-python-api
 build==1.5.0
     # via pip-tools
-certifi==2026.5.20
+certifi==2026.10.18
     # via requests
 cffi==2.0.0
     # via cryptography
