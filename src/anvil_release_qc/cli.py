@@ -80,6 +80,12 @@ def ade_qc(
         "--allow-controlled-access",
         help="Opt in to controlled-access snapshots (any consentCode). Default off = open-access only.",
     ),
+    keep_workspace: bool = typer.Option(
+        False,
+        "--keep-workspace",
+        help="Keep the created QC workspace even when QC passes. Default off = the workspace is deleted "
+        "after a passing QC (and always retained when QC fails).",
+    ),
     azul_token_file: Optional[str] = typer.Option(
         None,
         "--azul-token-file",
@@ -101,6 +107,7 @@ def ade_qc(
             dry_run=dry_run,
             catalog=catalog,
             allow_controlled_access=allow_controlled_access,
+            keep_workspace=keep_workspace,
             azul_token_file=azul_token_file,
             verify_auth=verify_auth,
         )
@@ -140,6 +147,12 @@ def tdr_qc(
         "--allow-controlled-access",
         help="Opt in to controlled-access snapshots (any consentCode). Default off = open-access only.",
     ),
+    keep_workspace: bool = typer.Option(
+        False,
+        "--keep-workspace",
+        help="Keep the created QC workspace even when QC passes. Default off = the workspace is deleted "
+        "after a passing QC (and always retained when QC fails).",
+    ),
     verify_auth: bool = typer.Option(
         False,
         "--verify-auth",
@@ -161,6 +174,7 @@ def tdr_qc(
             config_path=config,
             dry_run=dry_run,
             allow_controlled_access=allow_controlled_access,
+            keep_workspace=keep_workspace,
             verify_auth=verify_auth,
         )
     except (SafetyError, BigQueryAccessError) as exc:

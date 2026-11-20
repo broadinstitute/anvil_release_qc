@@ -42,10 +42,10 @@ table comparison (T1–T2: table parity, row counts, column-count sanity) + auth
   verdict. Strict-zero; fail-open on a health-endpoint blip. Also in `qc-batch-runner --verify-auth`. See
   [`docs/qc_batch_runner.md`](docs/qc_batch_runner.md) → *Azul reindexing*.
 - **Data-volume metrics** (`total_table_count` / `total_row_count` / `total_value_count`) and **per-stage
-  durations** (minutes) — computed early and surfaced even on a failed/timed-out import, and exposed as
-  WDL outputs; instruments for the Terra Data Table capacity question (below).
+  durations** (minutes) — computed early and surfaced even on a failed/timed-out import, in the report and
+  detailed log (no longer WDL outputs); instruments for the Terra Data Table capacity question (below).
 - **Run metadata as WDL outputs / data-table columns** (v0.3.5) — **run timestamps** (`run_began` /
-  `run_ended`, UTC ISO-8601 to the second, all four workflows) and, for `ade-qc`/`tdr-qc`, the **created
+  `run_ended`, UTC ISO-8601 to the second; `compare` / `compare-ingest` only) and, for `ade-qc`/`tdr-qc`, the **created
   workspace** (`workspace_namespace` / `workspace_name`) — so results sort by run time, correlate to a
   UCSC reindex/fix, and the retained test workspace is findable for a later `compare` / cross-operator
   access / cleanup.
@@ -226,7 +226,7 @@ values** (they coincided only for some legacy billing projects, so keep them sep
 e.g. `terra-xxxxxxxx`) that **BigQuery jobs run in / are billed to** (and requester-pays later) — *not* the
 Terra billing project. `check_bigquery_access` preflights it (also in `--verify-auth`).
 
-**Workspace creation:** one **retained** workspace **per run**. Name =
+**Workspace creation:** one workspace **per run** — **deleted automatically when the QC reports no validation errors**, and **retained as-is** otherwise (a QC failure, or a failed/timed-out import, for investigation); the default-false `--keep-workspace` flag (`keep_workspace` WDL input) keeps it even after a pass. Name =
 `<user-local-part>_<infix>_<sanitized full snapshot name>_YYYYMMDDHHMM` (run start time,
 **minute-granular**), sanitizing any non-`[A-Za-z0-9_-]` run to a single `_`. The leading `qc`
 segment makes these workspaces easy to identify/group/delete (they accumulate — R4); the infix also
@@ -236,7 +236,7 @@ is a parameter of `workspace.workspace_name` (`ADE_NAME_INFIX` / `TDR_NAME_INFIX
 (not per-day) is for the **batch** use case (the primary one): a QC workflow that fails transiently
 can be **rerun without colliding** on an existing workspace — Terra workflows take minutes to start,
 so minute resolution suffices. **Fail fast** if the name already exists (now a rare same-minute edge).
-Trade-off: workspaces accumulate per run (see risk R4). Create with `authorizationDomain: []` and
+Trade-off: workspaces from failed runs accumulate (see risk R4). Create with `authorizationDomain: []` and
 `enhancedBucketLogging: true`; the import applies the auth domain for controlled-access datasets — we
 **verify**, never set it.
 

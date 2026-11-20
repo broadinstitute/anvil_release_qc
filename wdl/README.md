@@ -140,35 +140,17 @@ Every workflow runs to completion and emits:
 | Output | Meaning |
 |---|---|
 | `qc_passed` (Boolean) | the headline result — **sort/filter this column** in your data table to find failures |
-| `qc_exit_code` (Int) | `0` = PASS, `1` = QC failure, `2` = safety abort (e.g. a non-open-access snapshot blocked by the consent gate) **or a preflight/config failure** (e.g. a misconfigured `billing_google_project_id`) |
+| `qc_exit_code` (Int) *(`compare` / `compare-ingest` only)* | `0` = PASS, `1` = QC failure, `2` = safety abort (e.g. a non-open-access snapshot blocked by the consent gate) **or a preflight/config failure** (e.g. a misconfigured `billing_google_project_id`) |
 | `qc_report` (File) | the human-readable comparison report (ends with the stage-timing summary line) |
 | `detailed_log` (File) | the full redacted request/response log |
 
-**`ade-qc` / `tdr-qc`, `compare` — snapshot data-volume counts** (sortable data-table columns; an instrument
-for the Terra Data Table capacity challenge — see [`docs/comparison.md`](../docs/comparison.md)):
+**Run timing and data volume** are no longer WDL outputs (so they are not written to the data table). The
+`ade-qc` / `tdr-qc` task still runs the same steps and surfaces them in the files it does emit: the
+stage-timing summary line and the snapshot data-volume line (`total_table_count=… | total_row_count=… |
+total_value_count=…`) are appended to `qc_report`, and the run times are in `detailed_log`. See
+[`docs/comparison.md`](../docs/comparison.md).
 
-| Output | Meaning |
-|---|---|
-| `total_table_count` (Int) | non-system, non-empty tables (matches "N tables compared") |
-| `total_row_count` (Int) | Σ rows |
-| `total_value_count` (Int) | Σ (rows × schema columns) — a modest over-approximation of imported volume |
-
-For `ade-qc`/`tdr-qc` these are computed **before** the import, so they're populated **even on a failed
-row** (`qc_passed=false`) — telling you how big the snapshot that wouldn't import was. **Not** emitted by
-`compare-ingest` (an intentional partial comparison). The report shows them comma-separated for reading;
-the outputs are the raw integers.
-
-**`ade-qc` / `tdr-qc` only** — per-stage durations in **minutes** (the user-experienced delays; `0.0`
-if a stage didn't run, e.g. a dry run; **partial durations are surfaced even on a failed/timed-out
-import**, e.g. `import_minutes≈120` when the 2 h wait elapses), as sortable data-table columns:
-
-| Output | Meaning |
-|---|---|
-| `azul_manifest_minutes` *(ade-qc)* / `tdr_export_minutes` *(tdr-qc)* (Float) | the export step (TDR/Azul) |
-| `workspace_create_minutes` (Float) | Rawls `createWorkspace` |
-| `import_minutes` (Float) | Firecloud `importJob` — usually the dominant stage, growing with dataset size |
-
-**All four workflows** — run start/end wall-clock, captured by the WDL task around the CLI call
+**`compare` / `compare-ingest` only** — run start/end wall-clock, captured by the WDL task around the CLI call
 (so present on **every** row, including failures), as sortable data-table columns:
 
 | Output | Meaning |
@@ -176,14 +158,14 @@ import**, e.g. `import_minutes≈120` when the 2 h wait elapses), as sortable da
 | `run_began` (String) | when the run started |
 | `run_ended` (String) | when the run finished (success *or* failure) |
 
-Both are **UTC, ISO 8601 to the second** (e.g. `2026-08-23T13:09:24Z`). Terra data tables have no
-date/time type, so they're strings — chosen to **sort chronologically**, be timezone-unambiguous (UTC/`Z`)
-for operators across time zones, and contain no spaces (so a TSV export stays unquoted in Excel). Useful
-for QC management — e.g. sorting by run time, or spotting rows last QC'd **before** a UCSC reindex/fix.
+Both are **UTC, ISO 8601 to the second** (e.g. `2026-08-23T13:09:24Z`), so they sort chronologically and are
+timezone-unambiguous.
 
 **`ade-qc` / `tdr-qc` only** — the created **Analysis Workspace** the flow exports/imports into (empty if
-no workspace was created, e.g. a dry run or a pre-import failure; **present even on a failed import**,
-since the workspace is retained), as data-table columns:
+no workspace was created, e.g. a dry run or a pre-import failure; **present even on a failed import**).
+**The workspace is deleted automatically when the QC reports no validation errors** (so on a passing row
+these columns name a workspace that no longer exists); on a QC failure or a failed import it is retained as-is
+for investigation. Set the **`keep_workspace`** input (CLI `--keep-workspace`, default `false`) to keep it even after a pass. As data-table columns:
 
 | Output | Meaning |
 |---|---|
@@ -193,10 +175,10 @@ since the workspace is retained), as data-table columns:
 Having these in the table lets you **run `compare` against a workspace whose import outran the wait**
 (or as `compare` gains finer-grained tiers), **discover another operator's run** (the workspace is
 owner-only by default — see who created it, then request access for manual/automated follow-up), and
-**bulk-clean-up** retained workspaces (see R4).
+**bulk-clean-up** the retained (failed-run) workspaces (see R4).
 
 The task **always succeeds** so the report is always produced (a *failed* Cromwell task delocalizes no
-outputs). Identify failures by the `qc_passed` / `qc_exit_code` columns — no need to open each report.
+outputs). Identify failures by the `qc_passed` column (and `qc_exit_code` for `compare` / `compare-ingest`) — no need to open each report.
 (QC comparison time is intentionally *not* reported — it's quick and not a user-experienced delay.)
 
 ### One data table per release, shared by `ade-qc` and `tdr-qc`

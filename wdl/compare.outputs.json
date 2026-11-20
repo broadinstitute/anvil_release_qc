@@ -4,8 +4,5 @@
   "Compare.qc_passed": "${this.qc_passed}",
   "Compare.qc_report": "${this.qc_report}",
   "Compare.run_began": "${this.run_began}",
-  "Compare.run_ended": "${this.run_ended}",
-  "Compare.total_row_count": "${this.total_row_count}",
-  "Compare.total_table_count": "${this.total_table_count}",
-  "Compare.total_value_count": "${this.total_value_count}"
+  "Compare.run_ended": "${this.run_ended}"
 }

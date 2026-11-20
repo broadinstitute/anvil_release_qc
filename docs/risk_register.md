@@ -70,7 +70,7 @@ comparison fails (to tune the profile).
 
 ### R4 — Batch-scale robustness & retained-workspace cost/quota
 **Impact:** Across hundreds of datasets, transient failures/rate-limits/partial state are normal.
-Mid-run failure leaves a half-created workspace. Retained workspaces accumulate → Terra
+Mid-run failure leaves a half-created workspace. Workspaces from runs whose QC passed are now deleted automatically; the rest (QC failures, failed imports) are retained and accumulate → Terra
 billing-project quota + ongoing cost + an eventual cleanup/lifecycle question — **more so now** that
 workspace names are minute-granular (a new workspace per run, including reruns).
 **Decision (2026-06-10):** workspace timestamp is minute-granular (`…_YYYYMMDDHHMM`) so batch reruns
