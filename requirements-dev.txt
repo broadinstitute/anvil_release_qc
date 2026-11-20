@@ -233,7 +233,7 @@ protobuf==7.35.0
     #   proto-plus
 pyarrow==26.0.1
     # via db-dtypes
-pyasn1==0.6.3
+pyasn1==0.6.5
     # via
     #   oauth2client
     #   pyasn1-modules
