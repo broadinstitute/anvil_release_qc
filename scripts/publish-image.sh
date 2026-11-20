@@ -13,7 +13,7 @@
 #   scripts/publish-image.sh 0.1.1     # explicit tag
 set -euo pipefail
 
-PROJECT="dsp-sa-development"
+PROJECT="operations-portal-427515"
 REGION="us-central1"
 REPO="anvil-qc"
 IMAGE="anvil-release-qc"
