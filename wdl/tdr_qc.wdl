@@ -50,7 +50,7 @@ workflow TdrQc {
         tier: "Tier (dev|prod). Optional; defaults to the config's default_tier."
         dry_run: "Validate the export side only (TDR snapshot export); create no workspace, no import."
         allow_controlled_access: "Opt in to controlled-access snapshots (any consentCode). Default false = open-access only. No Azul token needed."
-        keep_workspace: "Keep the created QC workspace even when QC passes. Default false = it is deleted after a passing QC (always retained on a QC failure or failed import).",
+        keep_workspace: "Keep the created QC workspace even when QC passes. Default false = it is deleted after a passing QC (always retained on a QC failure or failed import)."
         docker: "anvil-release-qc image reference, e.g. <registry>/anvil-release-qc:<tag>."
     }
 }
