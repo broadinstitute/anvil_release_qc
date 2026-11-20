@@ -13,7 +13,8 @@ The **shared tail** (``_create_import_and_qc``) is: Rawls createWorkspace (autho
 verification). ade-qc uses Azul + an Azul token; tdr-qc uses Terra/ADC tokens throughout.
 
 End-to-end execution requires real per-tier ADC credentials and a real TDR snapshot, and creates a
-real (retained) workspace.
+real workspace, which is deleted again if the QC reports no validation errors (and retained for
+review otherwise).
 """
 
 from __future__ import annotations
@@ -101,6 +102,21 @@ def _http_status(exc: requests.exceptions.HTTPError) -> Optional[int]:
     return getattr(getattr(exc, "response", None), "status_code", None)
 
 
+def _delete_workspace(workspace: TerraWorkspace) -> None:
+    """Delete a QC workspace after a passing QC. A failed delete never changes the QC result.
+
+    Only ever called with the workspace this run created, and only when QC reported no validation errors.
+    If the delete fails the workspace is simply left in place (and the failure logged) for manual cleanup.
+    """
+    ref = f"{workspace.billing_project}/{workspace.workspace_name}"
+    try:
+        workspace.delete_workspace()
+    except requests.exceptions.RequestException as exc:
+        logger.warning("QC passed, but deleting workspace %s failed (%s); it was left in place.", ref, exc)
+        return
+    logger.info("QC passed with no validation errors; deleted workspace %s.", ref)
+
+
 def _create_workspace_resilient(
     rawls: RawlsClient, workspace: TerraWorkspace, *, description: str
 ) -> None:
@@ -148,39 +164,46 @@ def _create_workspace_resilient(
         )
     # Confirm-or-adopt. A 404 means "not visible yet"; a transient 5xx or Timeout/ConnectionError on the
     # GET is the same contended condition that failed the create -- all just retry. Definitive 4xx propagates.
-    for attempt in range(1, WORKSPACE_ADOPT_ATTEMPTS + 1):
-        ws = None
-        try:
-            ws = workspace.get_workspace_info().json()
-        except requests.exceptions.HTTPError as get_exc:
-            status = _http_status(get_exc)
-            retryable = status == 404 or (status is not None and status >= 500)
-            if not retryable:
-                raise  # a definitive 4xx (403/...) -- do not mask it
-        except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
-            pass  # same load that failed the create; treat as not-yet-visible and retry
-        if ws is not None:
-            domains = workspace_auth_domains(ws)
-            if domains:
-                raise SafetyError(
-                    f"createWorkspace for {namespace}/{name} did not succeed and an existing workspace "
-                    f"of that name has a non-empty auth domain {domains}; refusing to adopt it (a "
-                    "just-created workspace must have none -- the import applies the auth domain)."
+    # The confirm GETs get a short per-request timeout (the create itself ran with the longer one); the
+    # original timeout is restored afterwards because the same workspace object is reused to delete it.
+    create_timeout = workspace.request_util.timeout
+    workspace.request_util.timeout = WORKSPACE_ADOPT_GET_TIMEOUT
+    try:
+        for attempt in range(1, WORKSPACE_ADOPT_ATTEMPTS + 1):
+            ws = None
+            try:
+                ws = workspace.get_workspace_info().json()
+            except requests.exceptions.HTTPError as get_exc:
+                status = _http_status(get_exc)
+                retryable = status == 404 or (status is not None and status >= 500)
+                if not retryable:
+                    raise  # a definitive 4xx (403/...) -- do not mask it
+            except (requests.exceptions.Timeout, requests.exceptions.ConnectionError):
+                pass  # same load that failed the create; treat as not-yet-visible and retry
+            if ws is not None:
+                domains = workspace_auth_domains(ws)
+                if domains:
+                    raise SafetyError(
+                        f"createWorkspace for {namespace}/{name} did not succeed and an existing workspace "
+                        f"of that name has a non-empty auth domain {domains}; refusing to adopt it (a "
+                        "just-created workspace must have none -- the import applies the auth domain)."
+                    )
+                logger.info(
+                    "createWorkspace did not return cleanly but %s/%s exists server-side with an empty "
+                    "auth domain; adopting it and continuing to the import.",
+                    namespace,
+                    name,
                 )
-            logger.info(
-                "createWorkspace did not return cleanly but %s/%s exists server-side with an empty auth "
-                "domain; adopting it and continuing to the import.",
-                namespace,
-                name,
-            )
-            return
-        if attempt < WORKSPACE_ADOPT_ATTEMPTS:
-            time.sleep(WORKSPACE_ADOPT_POLL_SECONDS)
-    # Never confirmed the workspace -- the create genuinely failed (or Rawls stayed unreachable).
-    raise RuntimeError(
-        f"createWorkspace for {namespace}/{name} did not succeed and the workspace could not be "
-        f"confirmed created after {WORKSPACE_ADOPT_ATTEMPTS} checks. Re-run to retry."
-    ) from create_exc
+                return
+            if attempt < WORKSPACE_ADOPT_ATTEMPTS:
+                time.sleep(WORKSPACE_ADOPT_POLL_SECONDS)
+        # Never confirmed the workspace -- the create genuinely failed (or Rawls stayed unreachable).
+        raise RuntimeError(
+            f"createWorkspace for {namespace}/{name} did not succeed and the workspace could not be "
+            f"confirmed created after {WORKSPACE_ADOPT_ATTEMPTS} checks. Re-run to retry."
+        ) from create_exc
+    finally:
+        workspace.request_util.timeout = create_timeout
 
 
 @dataclass(frozen=True)
@@ -271,6 +294,7 @@ def _create_import_and_qc(
     infix: str,
     description: str,
     durations: dict[str, float],
+    keep_workspace: bool = False,
 ) -> dict:
     """Shared tail for both flows: create the workspace, hand off the signed URL to the import, wait,
     then QC the workspace against the snapshot.
@@ -284,22 +308,19 @@ def _create_import_and_qc(
     # Rawls: create the destination workspace (empty auth domain; the import applies it).
     ws_name = workspace_name(tier.email, name, infix=infix)
     rawls = RawlsClient(tier.url("rawls"), google_token, timeout=RAWLS_TIMEOUT)
+    workspace = make_terra_workspace(
+        tier, google_token, tier.terra_billing_project, ws_name, timeout=RAWLS_TIMEOUT
+    )
     logger.info("Creating workspace %s/%s", tier.terra_billing_project, ws_name)
     try:
         with stage_timer("workspace_create", durations):
             _create_workspace_resilient(
                 rawls,
-                make_terra_workspace(
-                    tier,
-                    google_token,
-                    tier.terra_billing_project,
-                    ws_name,
-                    timeout=WORKSPACE_ADOPT_GET_TIMEOUT,
-                ),
+                workspace,
                 description=description,
             )
         # Stable, greppable marker for the created workspace, logged BEFORE the import so it is present
-        # even if the import later fails (the retained workspace still exists). The WDL parses it into the
+        # even if the import later fails (the workspace is retained then). The WDL parses it into the
         # workspace_namespace/workspace_name data-table columns -- for a later `compare`, cross-operator
         # discovery/access of another operator's run, or (bulk) cleanup. namespace + name are both from
         # [A-Za-z0-9_-] (no spaces/slashes), so the single '/' splits them cleanly.
@@ -345,9 +366,19 @@ def _create_import_and_qc(
             token_provider=google_token,
         )
         logger.info("QC report:\n%s", qc.render())
-        if not qc.passed:
+        if qc.passed and keep_workspace:
+            logger.info(
+                "QC passed; keeping workspace %s/%s (keep_workspace is set).",
+                tier.terra_billing_project,
+                ws_name,
+            )
+        elif qc.passed:
+            # No validation errors: the QC workspace has served its purpose, so clean it up.
+            _delete_workspace(workspace)
+        else:
+            # Validation errors: leave the workspace as-is so the failure can be investigated.
             logger.warning(
-                "QC FAILED for %s/%s -- see the report above.",
+                "QC FAILED for %s/%s -- see the report above. The workspace is retained for review.",
                 tier.terra_billing_project,
                 ws_name,
             )
@@ -375,6 +406,7 @@ def run_ade_qc(
     dry_run: bool = False,
     catalog: Optional[str] = None,
     allow_controlled_access: bool = False,
+    keep_workspace: bool = False,
     azul_token_file: Optional[str] = None,
     verify_auth: bool = False,
 ) -> dict:
@@ -540,6 +572,7 @@ def run_ade_qc(
             infix=ADE_NAME_INFIX,
             description=f"AnVIL Data Release QC export of {name}",
             durations=durations,
+            keep_workspace=keep_workspace,
         ),
         **asdict(volume),
     }
@@ -552,6 +585,7 @@ def run_tdr_qc(
     log_dir: Path = Path("logs"),
     dry_run: bool = False,
     allow_controlled_access: bool = False,
+    keep_workspace: bool = False,
     verify_auth: bool = False,
 ) -> dict:
     """Run the TDR direct-export + QC flow for one TDR snapshot. Returns the created workspace + log path.
@@ -677,6 +711,7 @@ def run_tdr_qc(
             infix=TDR_NAME_INFIX,
             description=f"AnVIL Data Release TDR-export QC of {name}",
             durations=durations,
+            keep_workspace=keep_workspace,
         ),
         **asdict(volume),
     }

@@ -35,9 +35,6 @@ workflow Compare {
         Boolean qc_passed = compare.qc_passed
         String run_began = compare.run_began
         String run_ended = compare.run_ended
-        Int total_table_count = compare.total_table_count
-        Int total_row_count = compare.total_row_count
-        Int total_value_count = compare.total_value_count
     }
 
     parameter_meta {
@@ -86,14 +83,6 @@ task compare {
         set -e
         date -u '+%Y-%m-%dT%H:%M:%SZ' > run_ended.txt
 
-        # Data-volume counts: the `compare` command echoes the line into the report (stdout). Parse the
-        # counts (commas stripped) into Int outputs; default 0 if absent.
-        VOLUME="$(grep -F 'Data volume (TDR snapshot)' qc_report.txt | tail -1 || true)"
-        for metric in total_table_count total_row_count total_value_count; do
-            echo "$VOLUME" | grep -oE "${metric}=[0-9,]+" | head -1 | cut -d= -f2 | tr -d ',' > "${metric}.txt" || true
-            [ -s "${metric}.txt" ] || echo 0 > "${metric}.txt"
-        done
-
         cat qc_report.txt  # also surface the report in the Cromwell task stdout
     >>>
 
@@ -112,9 +101,5 @@ task compare {
         # Run start/end wall-clock (UTC, ISO 8601, second granularity), captured around the CLI call.
         String run_began = read_string("run_began.txt")
         String run_ended = read_string("run_ended.txt")
-        # Snapshot data volume (non-system, non-empty tables) — useful for the post-import-timeout re-check.
-        Int total_table_count = read_int("total_table_count.txt")
-        Int total_row_count = read_int("total_row_count.txt")
-        Int total_value_count = read_int("total_value_count.txt")
     }
 }

@@ -36,6 +36,8 @@ class FakeRawls:
         self._get_results = list(get_results or [])
         self.create_calls = 0
         self.get_calls = 0
+        self.request_util = types.SimpleNamespace(timeout=300)
+        self.get_timeouts = []
 
     def create_workspace(self, namespace, name, *, description=""):
         self.create_calls += 1
@@ -54,9 +56,11 @@ class _FakeWorkspace:
 
     def __init__(self, rawls):
         self._rawls = rawls
+        self.request_util = rawls.request_util
 
     def get_workspace_info(self):
         self._rawls.get_calls += 1
+        self._rawls.get_timeouts.append(self.request_util.timeout)
         result = self._rawls._get_results.pop(0)
         if isinstance(result, Exception):
             raise result
@@ -72,6 +76,15 @@ def test_normal_path_no_adopt():
     rawls = FakeRawls()
     _create_workspace_resilient(rawls, rawls.workspace, description="d")
     assert rawls.create_calls == 1 and rawls.get_calls == 0  # created cleanly; no GET/adopt
+
+
+def test_confirm_gets_use_short_timeout_then_restore():
+    rawls = FakeRawls(
+        create_exc=requests.exceptions.ReadTimeout("slow"), get_results=[_ws([])]
+    )
+    _create_workspace_resilient(rawls, rawls.workspace, description="d")
+    assert rawls.get_timeouts == [pipeline.WORKSPACE_ADOPT_GET_TIMEOUT]
+    assert rawls.request_util.timeout == 300  # restored for the later delete
 
 
 def test_adopts_when_timeout_but_workspace_exists():
@@ -183,3 +196,33 @@ def test_retries_adopt_get_on_transient_5xx():
     )
     _create_workspace_resilient(rawls, rawls.workspace, description="d")
     assert rawls.get_calls == 2
+
+
+# --- cleanup of the QC workspace after a passing QC ---
+
+
+class _DeletableWorkspace:
+    billing_project = "ns"
+    workspace_name = "ws"
+
+    def __init__(self, exc=None):
+        self._exc = exc
+        self.deleted = 0
+
+    def delete_workspace(self):
+        self.deleted += 1
+        if self._exc is not None:
+            raise self._exc
+
+
+def test_delete_workspace_deletes_it():
+    ws = _DeletableWorkspace()
+    pipeline._delete_workspace(ws)
+    assert ws.deleted == 1
+
+
+def test_delete_workspace_failure_is_swallowed_and_logged(caplog):
+    ws = _DeletableWorkspace(exc=_http_error(500))
+    pipeline._delete_workspace(ws)  # must not raise: a failed cleanup never changes the QC result
+    assert ws.deleted == 1
+    assert "left in place" in caplog.text
