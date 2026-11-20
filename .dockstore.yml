@@ -1,0 +1,17 @@
+version: 1.2
+workflows:
+  - name: AnVILDataExplorerQC
+    subclass: WDL
+    primaryDescriptorPath: /wdl/ade_qc.wdl
+
+  - name: TdrQC
+    subclass: WDL
+    primaryDescriptorPath: /wdl/tdr_qc.wdl
+
+  - name: Compare
+    subclass: WDL
+    primaryDescriptorPath: /wdl/compare.wdl
+
+  - name: CompareIngest
+    subclass: WDL
+    primaryDescriptorPath: /wdl/compare_ingest.wdl
