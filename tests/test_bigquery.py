@@ -1,20 +1,20 @@
-"""Tests for the BigQuery data-volume metrics (anvil_data_qc.bigquery), no network."""
+"""Tests for the BigQuery data-volume metrics (anvil_release_qc.bigquery), no network."""
 
 import re
 
 import pytest
 
-from anvil_data_qc import bigquery as bq
-from anvil_data_qc.bigquery import (
+from anvil_release_qc import bigquery as bq
+from anvil_release_qc.bigquery import (
     DATA_VOLUME_PREFIX,
     BigQueryAccessError,
     DataVolume,
     check_bigquery_access,
     snapshot_data_volume,
 )
-from anvil_data_qc.compare.engine import compare_inventories
-from anvil_data_qc.compare.profile import TDR_SYSTEM_TABLES, ComparisonProfile
-from anvil_data_qc.compare.sources import BigQuerySnapshotSource, TableShape
+from anvil_release_qc.compare.engine import compare_inventories
+from anvil_release_qc.compare.profile import TDR_SYSTEM_TABLES, ComparisonProfile
+from anvil_release_qc.compare.sources import BigQuerySnapshotSource, TableShape
 
 
 class _Row:
@@ -96,7 +96,7 @@ def test_summary_line_has_commas_and_parses_back():
 def test_snapshot_data_volume_logs_the_canonical_line(monkeypatch, caplog):
     import logging
 
-    from anvil_data_qc.logging_setup import LOGGER_NAME
+    from anvil_release_qc.logging_setup import LOGGER_NAME
 
     _patch_client(monkeypatch, columns={"t1": 2}, rows={"t1": 5})
     with caplog.at_level(logging.INFO, logger=LOGGER_NAME):

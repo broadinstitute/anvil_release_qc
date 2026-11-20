@@ -41,7 +41,7 @@ TDR (`data.terra.bio` / dev `jade.datarepo-dev…`), Rawls, Firecloud, Sam. The 
 token, no `azul-login`.** The signed manifest/parquet URLs are produced and signed by TDR's own service
 account; the Terra import service fetches them server-side.
 
-**Auth preflight (`--verify-auth`).** `anvil-data-qc tdr-qc --snapshot-id <id> --tier <t> --verify-auth`
+**Auth preflight (`--verify-auth`).** `anvil-release-qc tdr-qc --snapshot-id <id> --tier <t> --verify-auth`
 runs the identity guard, reads the snapshot (confirming entitlement), and checks the consent gate, then
 prints a `✓ AUTH VERIFIED` line and exits — **before any export or signed URL**. A quick, side-effect-free
 confidence check, especially when switching between accounts/tiers/data programs. (Same flag on `ade-qc`,
@@ -121,7 +121,7 @@ This was initially flagged as an open question (could `false` under-protect a co
 So `tdr-qc` keeps `tdrSyncPermissions: false` for all data and supports controlled-access via the standard
 default-off `--allow-controlled-access` opt-in (`safety.assert_consent_permitted`).
 
-## Safety mapping (the four layers — see [`../src/anvil_data_qc/safety.py`](../src/anvil_data_qc/safety.py))
+## Safety mapping (the four layers — see [`../src/anvil_release_qc/safety.py`](../src/anvil_release_qc/safety.py))
 
 1. **Consent gate** — open-access by default; controlled-access via the explicit `--allow-controlled-access`
    opt-in (`assert_consent_permitted`), enforced **before** the export (before any signed URL exists).

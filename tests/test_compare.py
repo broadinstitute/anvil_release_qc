@@ -1,9 +1,9 @@
 """Unit tests for the comparison engine, source helpers, and auth-domain check (no network)."""
 
-from anvil_data_qc.compare.authdomain import check_auth_domain
-from anvil_data_qc.compare.engine import compare_coverage, compare_inventories
-from anvil_data_qc.compare.profile import ComparisonProfile
-from anvil_data_qc.compare.sources import TableShape, build_nonempty_query, parse_entity_metadata
+from anvil_release_qc.compare.authdomain import check_auth_domain
+from anvil_release_qc.compare.engine import compare_coverage, compare_inventories
+from anvil_release_qc.compare.profile import ComparisonProfile
+from anvil_release_qc.compare.sources import TableShape, build_nonempty_query, parse_entity_metadata
 
 
 def _shape(rows: int, total: int, nonempty: int | None = None) -> TableShape:

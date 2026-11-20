@@ -4,9 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-`anvil-data-qc` is **built and in production use** (deployed image `:0.3.4`; repo now at `0.3.5`,
+`anvil-release-qc` is **built and in production use** (deployed image `:0.3.4`; repo now at `0.3.5`,
 pending publish). The package
-`src/anvil_data_qc/` provides: `config` (YAML + pydantic, tier resolution), `auth` (ADC per tier +
+`src/anvil_release_qc/` provides: `config` (YAML + pydantic, tier resolution), `auth` (ADC per tier +
 Sam-resolved identity guard), `azul_auth` (Azul token capture/validation), `logging_setup` + `redaction`
 (structured, secret-redacted request/response logging), `timing` (per-stage durations), `clients/` (base
 + `tdr`, `azul`, `rawls`, `firecloud`, `sam`), `bigquery` (Azul `dataset_id` resolution + snapshot
@@ -87,7 +87,7 @@ for developer setup, and [`docs/risk_register.md`](docs/risk_register.md) for tr
 
 ## What this project does
 
-`anvil-data-qc` provides automated **quality control of AnVIL data releases**. AnVIL hosts
+`anvil-release-qc` provides automated **quality control of AnVIL data releases**. AnVIL hosts
 hundreds of biomedical datasets, each combining relational tabular data with cloud file blobs.
 As each dataset is released, this tooling verifies the release end-to-end. Because there are
 hundreds of datasets, **thorough automation is the core requirement** — flows that are normally
@@ -163,7 +163,7 @@ restrictions — all AnVIL data)** and is enabled by an **explicit, default-off 
 `safety.assert_consent_permitted`), which permits any `consentCode` and emits an audit `WARNING`.
 Controlled runs also require an Azul token (`ade_qc.wdl` `azul_token` input). The other three safety layers
 (SignedUrl containment, hand-off verification, bearer-pinning) apply on every run. See
-[`src/anvil_data_qc/safety.py`](src/anvil_data_qc/safety.py) and risk **R8**. Keep the opt-in
+[`src/anvil_release_qc/safety.py`](src/anvil_release_qc/safety.py) and risk **R8**. Keep the opt-in
 **default-off**, and do not weaken layers 2–4.
 
 ## Deployment / structure constraints (decide code layout with these in mind)
@@ -205,7 +205,7 @@ flow itself is specified in [`docs/export_import_flow.md`](docs/export_import_fl
   `google.auth.default()` for REST bearer tokens *and* the BigQuery client; tokens auto-refresh, so
   long ops survive the ~1 h expiry.
 - **Azul needs its own token** — it rejects the gcloud ADC token (requires `azp` == Azul's OAuth
-  client). Capture one interactively with `anvil-data-qc azul-login` (validated via Google `tokeninfo`,
+  client). Capture one interactively with `anvil-release-qc azul-login` (validated via Google `tokeninfo`,
   stored per tier in `azul_token_file`); no token ⇒ anonymous (open-access only). See
   [`export_import_flow.md`](docs/export_import_flow.md) → Authentication and risk **R7**.
 - **Identity guard:** before any API call, resolve the active credentials to their **canonical Terra

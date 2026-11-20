@@ -1,14 +1,14 @@
-"""Tests for qc_batch_runner (anvil_data_qc.batch), no network — a FakeClient stands in for Terra."""
+"""Tests for qc_batch_runner (anvil_release_qc.batch), no network — a FakeClient stands in for Terra."""
 
 import types
 
 import pytest
 import requests
 
-from anvil_data_qc.azul_auth import AzulReindexingError
-from anvil_data_qc.batch import runner
-from anvil_data_qc.batch.cli import _read_snapshot_ids, _terra_http_error_message
-from anvil_data_qc.batch.runner import (
+from anvil_release_qc.azul_auth import AzulReindexingError
+from anvil_release_qc.batch import runner
+from anvil_release_qc.batch.cli import _read_snapshot_ids, _terra_http_error_message
+from anvil_release_qc.batch.runner import (
     MAX_CONCURRENT_CEILING,
     BatchParams,
     Outcome,
@@ -23,7 +23,7 @@ from anvil_data_qc.batch.runner import (
     run_verify_auth,
     sliding_window_policy,
 )
-from anvil_data_qc.config import ResolvedTier
+from anvil_release_qc.config import ResolvedTier
 
 
 def _tier():

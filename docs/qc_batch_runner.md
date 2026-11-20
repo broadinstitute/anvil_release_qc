@@ -12,7 +12,7 @@ where `<prefix>` is `ade` or `tdr`) exactly as a single interactive run would; t
 classify outcomes and to skip datasets that already passed.
 
 > **Layer, not a fifth QC command.** The four QC operations (`ade-qc`, `tdr-qc`, `compare`,
-> `compare-ingest`) live in the `anvil-data-qc` CLI. `qc-batch-runner` is a deliberately separate CLI a
+> `compare-ingest`) live in the `anvil-release-qc` CLI. `qc-batch-runner` is a deliberately separate CLI a
 > layer above them — it submits the pipelines' **Terra method configs** via the submissions API rather
 > than calling the pipeline code. See [`README.md`](../README.md) and [`CLAUDE.md`](../CLAUDE.md).
 
@@ -31,7 +31,7 @@ polls each submission to a terminal state, then reads the resulting row to decid
 
 ## Inputs
 
-**From config (per tier — reuses [`config.py`](../src/anvil_data_qc/config.py)):** `tier`, credentials
+**From config (per tier — reuses [`config.py`](../src/anvil_release_qc/config.py)):** `tier`, credentials
 (ADC + the identity guard), the workspace namespace (= `terra_billing_project`), and a new per-tier
 **`qc_workspace_name`** — the existing shared QC workspace the runner submits into (also overridable on
 the CLI). Everything else (service URLs, authorized users, Azul OAuth client id) comes from the same
@@ -352,7 +352,7 @@ in [Running under Terra load](#running-under-terra-load)); a machine-readable re
 
 ## References
 
-- Code: [`src/anvil_data_qc/batch/`](../src/anvil_data_qc/batch/) — `cli.py`, `runner.py`, `terra.py`,
+- Code: [`src/anvil_release_qc/batch/`](../src/anvil_release_qc/batch/) — `cli.py`, `runner.py`, `terra.py`,
   `gcs.py`.
 - The QC flows it drives: [`export_import_flow.md`](export_import_flow.md) (`ade-qc`),
   [`tdr_export_flow.md`](tdr_export_flow.md) (`tdr-qc`).

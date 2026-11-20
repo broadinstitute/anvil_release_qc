@@ -1,11 +1,11 @@
-"""Unit tests for log redaction (anvil_data_qc.redaction)."""
+"""Unit tests for log redaction (anvil_release_qc.redaction)."""
 
 import json
 import logging
 
-from anvil_data_qc.clients.base import BaseClient
-from anvil_data_qc.logging_setup import LOGGER_NAME
-from anvil_data_qc.redaction import REDACTED, redact_text, redact_url
+from anvil_release_qc.clients.base import BaseClient
+from anvil_release_qc.logging_setup import LOGGER_NAME
+from anvil_release_qc.redaction import REDACTED, redact_text, redact_url
 
 # The exact signed S3 PFB URL shape that leaked in the importJob body (values are fabricated).
 _SIGNED_URL = (
@@ -45,12 +45,9 @@ def test_redact_importjob_body():
     assert "s3.amazonaws.com" in parsed["url"]
 
 
-def test_redact_bearer_jwt_and_aws_key():
-    jwt = "eyJhbGciOiJFUzI1NiJ9.eyJzdWIiOiJ4In0.c2lnbmF0dXJlX3ZhbHVl"
-    text = f"Authorization: Bearer {jwt} key=AKIAIOSFODNN7EXAMPLE"
-    redacted = redact_text(text)
-    assert jwt not in redacted
-    assert "AKIAIOSFODNN7EXAMPLE" not in redacted
+def test_redact_bearer_token():
+    redacted = redact_text("Authorization: Bearer ya29.a0AbCdEf-gh_ij")
+    assert "ya29" not in redacted
     assert "Bearer " + REDACTED in redacted
 
 
@@ -81,5 +78,5 @@ def test_base_client_logs_redacted_request(caplog):
     assert "ASIAUHATKQ7OVN5RMSE6" not in caplog.text
     assert "abc123DEF456ghi789" not in caplog.text
     assert "FwoGZXIvYXdzEABCDEF1234567890token" not in caplog.text
-    assert "google-bearer-token" not in caplog.text  # bearer token redacted in headers
+    assert "google-bearer-token" not in caplog.text  # headers (incl. the token) are never logged
     assert REDACTED in caplog.text

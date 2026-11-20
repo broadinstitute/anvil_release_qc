@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from google.auth.credentials import Credentials
 from google.cloud import bigquery
 
-from .logging_setup import LOGGER_NAME
+from anvil_release_qc.logging_setup import LOGGER_NAME
 
 logger = logging.getLogger(LOGGER_NAME)
 

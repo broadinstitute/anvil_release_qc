@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the anvil-data-qc image and push it to Google Artifact Registry (GAR).
+# Build the anvil-release-qc image and push it to Google Artifact Registry (GAR).
 #
 # Prerequisites (one-time -- see wdl/README.md, "Publish the image to GAR"):
 #   - the GAR repo exists:
@@ -13,10 +13,10 @@
 #   scripts/publish-image.sh 0.1.1     # explicit tag
 set -euo pipefail
 
-PROJECT="dsp-sa-development"
+PROJECT="operations-portal-427515"
 REGION="us-central1"
 REPO="anvil-qc"
-IMAGE="anvil-data-qc"
+IMAGE="anvil-release-qc"
 
 # Always build from the repo root (this script lives in scripts/).
 cd "$(dirname "$0")/.."

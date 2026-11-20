@@ -18,9 +18,9 @@ import requests
 from google.auth.credentials import Credentials
 from google.auth.transport.requests import Request
 
-from .config import ResolvedTier
+from anvil_release_qc.config import ResolvedTier
 
-logger = logging.getLogger("anvil_data_qc")
+logger = logging.getLogger("anvil_release_qc")
 
 # Scopes granted by a plain `gcloud auth application-default login` (openid, email, cloud-platform).
 SCOPES = (

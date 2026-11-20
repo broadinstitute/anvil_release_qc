@@ -1,6 +1,6 @@
 # Onboarding a new operator
 
-This guide is for a teammate who will **run AnVIL data-release QC** — the `anvil-data-qc` pipelines
+This guide is for a teammate who will **run AnVIL data-release QC** — the `anvil-release-qc` pipelines
 (`ade-qc` / `tdr-qc` / `compare` / `compare-ingest`) and/or the `qc-batch-runner`. For basic install and
 the command quickstart, start with the [README](../README.md#using-it-quickstart); this doc focuses on
 the **credentials, access, and verification** an operator needs to get set up cleanly.
@@ -56,7 +56,7 @@ data access.
    resource access per above).
 
 4. **Azul token (needed for `ade-qc` and any controlled-access data).** Run
-   `anvil-data-qc azul-login --tier <t>`. It mints a token for **whichever Google account you sign in as**,
+   `anvil-release-qc azul-login --tier <t>`. It mints a token for **whichever Google account you sign in as**,
    so make sure that's your tier account. The direct pipelines read it from the local `azul_token_file`;
    the **batch runner** reads it from the shared workspace's data (see
    [qc_batch_runner.md](qc_batch_runner.md) → "Azul-token pacing"). The token is short-lived (~1 h) and is
@@ -68,7 +68,7 @@ Before your first real run, confirm everything is wired up — **side-effect-fre
 
 ```bash
 qc-batch-runner --tier <t> --table <table> --pipeline ade_qc --verify-auth   # batch runner
-anvil-data-qc ade-qc --snapshot-id <id> --tier <t> --verify-auth             # a pipeline
+anvil-release-qc ade-qc --snapshot-id <id> --tier <t> --verify-auth             # a pipeline
 ```
 
 It prints `✓ AUTH VERIFIED — operating as <you>; workspace … reachable; … Azul token …` on success, or

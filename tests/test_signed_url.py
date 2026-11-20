@@ -1,4 +1,4 @@
-"""Tests for signed-URL containment, hand-off verification, and security guards (anvil_data_qc.safety)."""
+"""Tests for signed-URL containment, hand-off verification, and security guards (anvil_release_qc.safety)."""
 
 import json
 import logging
@@ -6,8 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from anvil_data_qc.logging_setup import LOGGER_NAME
-from anvil_data_qc.safety import (
+from anvil_release_qc.logging_setup import LOGGER_NAME
+from anvil_release_qc.safety import (
     SIGNED_URL_ALLOWED_PREFIXES,
     SignedUrl,
     SignedUrlDestinationError,
@@ -25,7 +25,7 @@ _DEV_PREFIX = (
     "https://s3.amazonaws.com/edu-ucsc-gi-platform-anvil-dev-storage-anvildev.us-east-1/",
 )
 _DEV_FIRECLOUD = "firecloud-orchestration.dsde-dev.broadinstitute.org"
-_SRC = Path(__file__).resolve().parent.parent / "src" / "anvil_data_qc"
+_SRC = Path(__file__).resolve().parent.parent / "src" / "anvil_release_qc"
 
 
 # --- SignedUrl containment ---

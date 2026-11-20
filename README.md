@@ -1,4 +1,4 @@
-# anvil-data-qc
+# anvil-release-qc
 
 **Automated quality control for AnVIL data releases.**
 
@@ -35,7 +35,7 @@ ADSW  ──ingestion──▶  TDR  ──indexing──▶  ADE  ──PFB exp
 - **ADE** — AnVIL Data Explorer: indexes the dataset and exports it as **PFB**.
 - **AW** — Analysis Workspace: a researcher's Terra workspace that receives the export.
 
-`anvil-data-qc` verifies each hop of this pipeline automatically, so a release can be trusted
+`anvil-release-qc` verifies each hop of this pipeline automatically, so a release can be trusted
 end-to-end.
 
 ## Purpose
@@ -84,8 +84,8 @@ All runs are **open-access only** by default — a fail-closed safety gate block
 
 ```bash
 # 1. Clone, create a virtualenv, install
-git clone https://github.com/mbaumann-broad/anvil-data-qc.git
-cd anvil-data-qc
+git clone https://github.com/broadinstitute/anvil_release_qc.git
+cd anvil_release_qc
 python -m venv .venv && source .venv/bin/activate
 pip install -e .
 
@@ -101,7 +101,7 @@ gcloud auth application-default login
 
 Open-access datasets need nothing more. Controlled-access is enabled with the default-off
 `--allow-controlled-access` opt-in (security-team approved): `ade-qc` additionally needs an Azul token
-(`anvil-data-qc azul-login --tier <tier>`), while `tdr-qc` needs none — your own Terra account must
+(`anvil-release-qc azul-login --tier <tier>`), while `tdr-qc` needs none — your own Terra account must
 already grant access to the controlled data.
 
 > **New operator?** See [`docs/operator_onboarding.md`](docs/operator_onboarding.md) for the full
@@ -112,7 +112,7 @@ already grant access to the controlled data.
 **Ingestion QC — did the submitter's data make it into TDR?** (the most common day-to-day check)
 
 ```bash
-anvil-data-qc compare-ingest \
+anvil-release-qc compare-ingest \
   --submitter-workspace-namespace <billing-project> \
   --submitter-workspace-name <workspace-name> \
   --snapshot-id <tdr-snapshot-id> \
@@ -122,14 +122,14 @@ anvil-data-qc compare-ingest \
 **Full release QC (ADE/Azul export) — export a snapshot to a new workspace and verify it:**
 
 ```bash
-anvil-data-qc ade-qc --snapshot-id <tdr-snapshot-id> --tier prod --catalog anvil15
+anvil-release-qc ade-qc --snapshot-id <tdr-snapshot-id> --tier prod --catalog anvil15
 #   add --dry-run to validate the export side only (no workspace created, no import run)
 ```
 
 **Same QC via a direct TDR export** (no ADE/Azul; for very large datasets that fail ADE export):
 
 ```bash
-anvil-data-qc tdr-qc --snapshot-id <tdr-snapshot-id> --tier prod
+anvil-release-qc tdr-qc --snapshot-id <tdr-snapshot-id> --tier prod
 #   uses Terra credentials throughout — no Azul token; add --dry-run for the export side only
 #   controlled-access: add --allow-controlled-access (no token; your Terra account must have access)
 ```
@@ -138,14 +138,14 @@ anvil-data-qc tdr-qc --snapshot-id <tdr-snapshot-id> --tier prod
 no export, no signed URL). Handy when switching between accounts/tiers/data programs:
 
 ```bash
-anvil-data-qc tdr-qc --snapshot-id <tdr-snapshot-id> --tier prod --verify-auth   # also on ade-qc
+anvil-release-qc tdr-qc --snapshot-id <tdr-snapshot-id> --tier prod --verify-auth   # also on ade-qc
 #   prints "✓ AUTH VERIFIED — … operating as <you>; snapshot <name> readable and <open|controlled> …"
 ```
 
 **Re-check an existing Analysis Workspace against its snapshot:**
 
 ```bash
-anvil-data-qc compare \
+anvil-release-qc compare \
   --snapshot-id <tdr-snapshot-id> \
   --workspace-namespace <billing-project> --workspace-name <workspace-name> \
   --tier prod
@@ -226,7 +226,7 @@ AnVIL data). It's enabled by an **explicit, default-off opt-in** — `--allow-co
 controlled-access run is a deliberate, audit-logged choice; layers 2–4 apply regardless. Controlled
 runs also need an Azul token (the `ade_qc.wdl` `azul_token` input) — see [`wdl/README.md`](wdl/README.md).
 
-→ See [`src/anvil_data_qc/safety.py`](src/anvil_data_qc/safety.py) and risk **R8** in
+→ See [`src/anvil_release_qc/safety.py`](src/anvil_release_qc/safety.py) and risk **R8** in
 [`docs/risk_register.md`](docs/risk_register.md).
 
 ## Running in Terra (Docker + WDL)
@@ -243,14 +243,14 @@ help characterize Terra Data Table capacity.
 ## Repository structure
 
 ```
-anvil-data-qc/
-├── src/anvil_data_qc/        # the importable package (all logic)
+anvil_release_qc/
+├── src/anvil_release_qc/        # the importable package (all logic)
 │   ├── cli.py                #   CLI entrypoint: ade-qc, tdr-qc, compare, compare-ingest, azul-login
 │   ├── config.py             #   YAML + pydantic config; tier resolution
 │   ├── auth.py, azul_auth.py #   Google ADC + identity guard; Azul token capture
 │   ├── safety.py             #   the fail-closed safety model (consent gate, signed-URL containment, …)
 │   ├── pipeline.py           #   the wired export/import + QC flow
-│   ├── clients/              #   HTTP clients: tdr, azul, rawls, firecloud, sam (+ redacting base)
+│   ├── clients/              #   HTTP clients: azul, rawls (create), firecloud, sam (+ redacting base); `toolkit.py` runs pyops-service-toolkit's TDR/TerraWorkspace under the same token pinning + redaction
 │   └── compare/              #   comparison engine: sources, engine, report, qc, ingest, …
 ├── wdl/                      # Terra/WDL wrappers + deploy guide (README.md)
 ├── docs/                     # architecture, service registry, flows, comparison, risks

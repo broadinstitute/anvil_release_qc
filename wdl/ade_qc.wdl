@@ -1,7 +1,7 @@
 version 1.0
 
 # Release QC via the ADE/Azul export (full export/import + verify): export a TDR snapshot to a NEW
-# Analysis Workspace and QC it (AW vs snapshot + auth-domain). Runs `anvil-data-qc ade-qc`.
+# Analysis Workspace and QC it (AW vs snapshot + auth-domain). Runs `anvil-release-qc ade-qc`.
 #
 # Open-access by default: the CLI consent gate blocks anything but consentCode == "NRES" (Azul queried
 # anonymously). For CONTROLLED-ACCESS (security-team approved, all AnVIL data): set
@@ -22,7 +22,7 @@ workflow AdeQc {
         Boolean dry_run = false
         Boolean allow_controlled_access = false
         File? azul_token
-        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.3.5"
+        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-release-qc:0.3.5"
     }
 
     call ade_qc {
@@ -62,7 +62,7 @@ workflow AdeQc {
         dry_run: "Validate the export side only (TDR -> BigQuery -> Azul); create no workspace, no import."
         allow_controlled_access: "Opt in to controlled-access snapshots (any consentCode). Default false = open-access only."
         azul_token: "Azul token file (secure bucket) for controlled-access; required when allow_controlled_access=true."
-        docker: "anvil-data-qc image reference, e.g. <registry>/anvil-data-qc:<tag>."
+        docker: "anvil-release-qc image reference, e.g. <registry>/anvil-release-qc:<tag>."
     }
 }
 
@@ -94,7 +94,7 @@ task ade_qc {
         # are present on every path (the task always completes; the CLI exit code is captured, not fatal).
         date -u '+%Y-%m-%dT%H:%M:%SZ' > run_began.txt
         set +e
-        anvil-data-qc ade-qc \
+        anvil-release-qc ade-qc \
             --config "~{config}" \
             --snapshot-id "~{snapshot_id}" \
             ~{"--tier " + tier} \

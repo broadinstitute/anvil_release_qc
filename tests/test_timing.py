@@ -1,12 +1,12 @@
-"""Tests for the stage-timing helper (anvil_data_qc.timing)."""
+"""Tests for the stage-timing helper (anvil_release_qc.timing)."""
 
 import logging
 import time
 
 import pytest
 
-from anvil_data_qc.logging_setup import LOGGER_NAME
-from anvil_data_qc.timing import format_stage_summary, log_stage_summary, stage_timer
+from anvil_release_qc.logging_setup import LOGGER_NAME
+from anvil_release_qc.timing import format_stage_summary, log_stage_summary, stage_timer
 
 
 def test_stage_timer_records_and_logs(caplog):

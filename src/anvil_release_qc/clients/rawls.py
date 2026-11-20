@@ -1,7 +1,7 @@
 """Rawls client.
 
 Step 4 of the flow: create the destination workspace (with an empty ``authorizationDomain`` -- the
-import applies it). Also reads a workspace's auth domain(s), for the later QC verification.
+import applies it). Also extracts a workspace's auth domain(s) from a workspace response (read via the toolkit).
 See docs/export_import_flow.md sections 4 and 6.
 """
 
@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Optional
 
-from .base import BaseClient
+from anvil_release_qc.clients.base import BaseClient
 
 
 class RawlsClient(BaseClient):
@@ -35,26 +35,6 @@ class RawlsClient(BaseClient):
             "addUsers": [],
         }
         return self.request("POST", "/api/workspaces", json_body=body).json()
-
-    def get_workspace(
-        self,
-        namespace: str,
-        name: str,
-        fields: Optional[str] = None,
-        timeout: Optional[float] = None,
-    ) -> dict:
-        params = {"fields": fields} if fields else None
-        return self.request(
-            "GET", f"/api/workspaces/{namespace}/{name}", params=params, timeout=timeout
-        ).json()
-
-    def entity_type_metadata(self, namespace: str, name: str) -> dict:
-        """GET /api/workspaces/{ns}/{name}/entities.
-
-        Returns ``{entityType: {"count": N, "attributeNames": [...], "idName": "..."}}`` -- the
-        structural overview used for the T1-T2 table comparison.
-        """
-        return self.request("GET", f"/api/workspaces/{namespace}/{name}/entities").json()
 
 
 def workspace_auth_domains(workspace: dict) -> list[str]:

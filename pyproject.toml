@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "anvil-data-qc"
+name = "anvil-release-qc"
 version = "0.3.5"
 description = "Processes and tools for AnVIL Data Release quality control"
 readme = "README.md"
@@ -16,14 +16,15 @@ dependencies = [
     "requests>=2.31",
     "google-auth>=2.30",
     "google-cloud-bigquery>=3.20",
+    "pyops-service-toolkit @ git+https://github.com/broadinstitute/pyops-service-toolkit.git@v12.23.0#egg=pyops-service-toolkit",
 ]
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.5", "pip-tools>=7"]
 
 [project.scripts]
-anvil-data-qc = "anvil_data_qc.cli:app"
-qc-batch-runner = "anvil_data_qc.batch.cli:run"
+anvil-release-qc = "anvil_release_qc.cli:app"
+qc-batch-runner = "anvil_release_qc.batch.cli:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]

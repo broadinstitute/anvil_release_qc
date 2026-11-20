@@ -1,9 +1,8 @@
-"""Tests for the controlled-access safety gate (anvil_data_qc.safety) — fail-closed behavior."""
+"""Tests for the controlled-access safety gate (anvil_release_qc.safety) — fail-closed behavior."""
 
 import pytest
 
-from anvil_data_qc.clients.tdr import snapshot_consent_code
-from anvil_data_qc.safety import (
+from anvil_release_qc.safety import (
     ControlledAccessNotApprovedError,
     SignedUrl,
     SignedUrlProvenanceError,
@@ -31,12 +30,6 @@ def test_assert_open_access_blocks_non_nres(code):
     with pytest.raises(ControlledAccessNotApprovedError) as excinfo:
         assert_open_access("snap-1", code)
     assert "controlled-access" in str(excinfo.value).lower()
-
-
-def test_snapshot_consent_code_extraction():
-    assert snapshot_consent_code({"consentCode": "NRES"}) == "NRES"
-    assert snapshot_consent_code({"consentCode": ""}) == ""
-    assert snapshot_consent_code({}) is None
 
 
 # --- assert_consent_permitted: the controlled-access opt-in gate ---

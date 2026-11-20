@@ -2,7 +2,7 @@
 
 from datetime import datetime
 
-from anvil_data_qc.workspace import (
+from anvil_release_qc.workspace import (
     ADE_NAME_INFIX,
     TDR_NAME_INFIX,
     sanitize,

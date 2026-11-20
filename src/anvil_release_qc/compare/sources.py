@@ -12,8 +12,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from google.cloud import bigquery
-
-from ..clients.rawls import RawlsClient
+from ops_utils.terra_util import TerraWorkspace
 
 
 @dataclass(frozen=True)
@@ -118,13 +117,11 @@ class RawlsWorkspaceSource(TabularDataSource):
     submitter/ADSW workspace, for ingestion QC) -- pass ``label`` to describe its role in the report.
     """
 
-    def __init__(
-        self, client: RawlsClient, namespace: str, name: str, *, label: str | None = None
-    ) -> None:
-        self.client = client
-        self.namespace = namespace
-        self.name = name
-        self.label = label or f"AW {namespace}/{name}"
+    def __init__(self, workspace: TerraWorkspace, *, label: str | None = None) -> None:
+        self.workspace = workspace
+        self.label = label or f"AW {workspace.billing_project}/{workspace.workspace_name}"
 
     def table_inventory(self) -> dict[str, TableShape]:
-        return parse_entity_metadata(self.client.entity_type_metadata(self.namespace, self.name))
+        # use_cache=False: right after an import the cached entity counts can be stale, and QC compares
+        # exact row counts.
+        return parse_entity_metadata(self.workspace.get_workspace_entity_info(use_cache=False).json())

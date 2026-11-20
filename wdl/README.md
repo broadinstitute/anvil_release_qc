@@ -1,4 +1,4 @@
-# Deploying anvil-data-qc (Docker + WDL)
+# Deploying anvil-release-qc (Docker + WDL)
 
 The same code that runs locally and in notebooks ships as a Docker image and runs non-interactively in
 Terra via the WDL workflows here. The image is **code-only** — no config, no secrets; everything
@@ -9,7 +9,7 @@ sensitive is supplied at run time.
 The image is published to GAR and referenced by the workflows below:
 
 ```
-us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:<tag>
+us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-release-qc:<tag>
 ```
 
 **One-time setup** (per project):
@@ -18,7 +18,7 @@ us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:<tag>
 gcloud services enable artifactregistry.googleapis.com --project dsp-sa-development
 gcloud artifacts repositories create anvil-qc \
   --repository-format=docker --location=us-central1 --project=dsp-sa-development \
-  --description="anvil-data-qc images"
+  --description="anvil-release-qc images"
 gcloud auth configure-docker us-central1-docker.pkg.dev   # let docker push to GAR
 ```
 
@@ -122,7 +122,7 @@ attribute) precisely because it's a safety setting you want readable in the vers
 Controlled-access is **security-team approved** (no restrictions — all AnVIL data) and gated behind an
 explicit, default-off opt-in. To QC a controlled-access snapshot:
 
-1. **Mint a fresh Azul token** locally: `anvil-data-qc azul-login --tier prod` (controlled data needs a
+1. **Mint a fresh Azul token** locally: `anvil-release-qc azul-login --tier prod` (controlled data needs a
    token; it lasts ~1 h).
 2. **Upload the token file to a secure bucket**, e.g. `gs://fc-secure-…/azul-token-prod.txt`.
 3. **Set two `ade_qc.wdl` inputs:** `allow_controlled_access = true` and `azul_token` = that `gs://` token
@@ -244,4 +244,4 @@ java -jar womtool-92.jar validate -i wdl/tdr_qc.inputs.example.json wdl/tdr_qc.w
 Validate `-i` against the **`*.inputs.example.json`** (literal values). The production `*.inputs.json`
 use Terra `workspace.`/`this.` references that resolve only inside Terra, so they are not standalone
 Cromwell inputs — Terra validates those. A repo test (`tests/test_wdl_versions.py`) separately pins every
-committed `anvil-data-qc:<tag>` image reference (WDL defaults + all inputs JSON) to `__version__`.
+committed `anvil-release-qc:<tag>` image reference (WDL defaults + all inputs JSON) to `__version__`.

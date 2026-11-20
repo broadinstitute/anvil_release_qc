@@ -2,7 +2,7 @@ version 1.0
 
 # Release QC via the TDR direct export (full export/import + verify): export a TDR snapshot directly
 # from TDR (no ADE/Azul) to a NEW Analysis Workspace and QC it (AW vs snapshot + auth-domain). Runs
-# `anvil-data-qc tdr-qc`. For very large datasets that fail to export via ADE/Azul.
+# `anvil-release-qc tdr-qc`. For very large datasets that fail to export via ADE/Azul.
 #
 # Uses the ambient Terra runtime service account throughout -- NO Azul token needed (unlike ade_qc.wdl),
 # for open- AND controlled-access. Open-access by default; controlled-access via allow_controlled_access
@@ -21,7 +21,7 @@ workflow TdrQc {
         String? tier
         Boolean dry_run = false
         Boolean allow_controlled_access = false
-        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-data-qc:0.3.5"
+        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-release-qc:0.3.5"
     }
 
     call tdr_qc {
@@ -57,7 +57,7 @@ workflow TdrQc {
         tier: "Tier (dev|prod). Optional; defaults to the config's default_tier."
         dry_run: "Validate the export side only (TDR snapshot export); create no workspace, no import."
         allow_controlled_access: "Opt in to controlled-access snapshots (any consentCode). Default false = open-access only. No Azul token needed."
-        docker: "anvil-data-qc image reference, e.g. <registry>/anvil-data-qc:<tag>."
+        docker: "anvil-release-qc image reference, e.g. <registry>/anvil-release-qc:<tag>."
     }
 }
 
@@ -87,7 +87,7 @@ task tdr_qc {
         # are present on every path (the task always completes; the CLI exit code is captured, not fatal).
         date -u '+%Y-%m-%dT%H:%M:%SZ' > run_began.txt
         set +e
-        anvil-data-qc tdr-qc \
+        anvil-release-qc tdr-qc \
             --config "~{config}" \
             --snapshot-id "~{snapshot_id}" \
             ~{"--tier " + tier} \

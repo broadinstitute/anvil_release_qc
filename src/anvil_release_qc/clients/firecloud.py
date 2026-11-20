@@ -16,9 +16,9 @@ import logging
 import time
 from typing import Optional
 
-from ..logging_setup import LOGGER_NAME
-from ..safety import SignedUrl
-from .base import BaseClient
+from anvil_release_qc.clients.base import BaseClient
+from anvil_release_qc.logging_setup import LOGGER_NAME
+from anvil_release_qc.safety import SignedUrl
 
 logger = logging.getLogger(LOGGER_NAME)
 

@@ -13,14 +13,15 @@ from typing import Callable, Optional
 from google.auth.credentials import Credentials
 from google.cloud import bigquery
 
-from ..clients.rawls import RawlsClient, workspace_auth_domains
-from ..clients.sam import SamClient
-from ..config import ResolvedTier
-from .authdomain import AuthDomainResult, check_auth_domain
-from .engine import run_comparison
-from .profile import ComparisonProfile
-from .report import ComparisonReport
-from .sources import BigQuerySnapshotSource, RawlsWorkspaceSource
+from anvil_release_qc.clients.rawls import workspace_auth_domains
+from anvil_release_qc.clients.sam import SamClient
+from anvil_release_qc.clients.toolkit import make_terra_workspace
+from anvil_release_qc.compare.authdomain import AuthDomainResult, check_auth_domain
+from anvil_release_qc.compare.engine import run_comparison
+from anvil_release_qc.compare.profile import ComparisonProfile
+from anvil_release_qc.compare.report import ComparisonReport
+from anvil_release_qc.compare.sources import BigQuerySnapshotSource, RawlsWorkspaceSource
+from anvil_release_qc.config import ResolvedTier
 
 
 @dataclass(frozen=True)
@@ -56,13 +57,13 @@ def run_qc_comparison(
 
     bq = bigquery.Client(project=tier.billing_google_project_id, credentials=creds)
     reference = BigQuerySnapshotSource(bq, bq_project, bq_dataset)
-    rawls = RawlsClient(tier.url("rawls"), token_provider, timeout=180)
-    candidate = RawlsWorkspaceSource(rawls, namespace, workspace_name)
+    workspace = make_terra_workspace(tier, token_provider, namespace, workspace_name)
+    candidate = RawlsWorkspaceSource(workspace)
     tables = run_comparison(reference, candidate, profile)
 
     sam = SamClient(tier.url("sam"), token_provider)
     expected = sam.snapshot_auth_domain(snapshot_id)
-    actual = workspace_auth_domains(rawls.get_workspace(namespace, workspace_name))
+    actual = workspace_auth_domains(workspace.get_workspace_info().json())
     auth_domain = check_auth_domain(expected, actual)
 
     return QcComparisonResult(tables=tables, auth_domain=auth_domain)

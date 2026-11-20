@@ -1,11 +1,11 @@
-"""Tests for the identity guard (anvil_data_qc.auth): Sam-resolved Terra user; no network."""
+"""Tests for the identity guard (anvil_release_qc.auth): Sam-resolved Terra user; no network."""
 
 import pytest
 import requests
 
-from anvil_data_qc import auth
-from anvil_data_qc.auth import IdentityMismatchError, assert_tier_identity, terra_user_email
-from anvil_data_qc.config import ResolvedTier
+from anvil_release_qc import auth
+from anvil_release_qc.auth import IdentityMismatchError, assert_tier_identity, terra_user_email
+from anvil_release_qc.config import ResolvedTier
 
 _HUMAN = "sa-user@broadinstitute.org"
 _PET = "pet-123@terra-abc.iam.gserviceaccount.com"

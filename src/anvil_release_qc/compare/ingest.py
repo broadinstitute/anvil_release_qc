@@ -16,11 +16,11 @@ from typing import Callable
 from google.auth.credentials import Credentials
 from google.cloud import bigquery
 
-from ..clients.rawls import RawlsClient
-from ..config import ResolvedTier
-from .engine import compare_coverage
-from .report import CoverageReport
-from .sources import BigQuerySnapshotSource, RawlsWorkspaceSource
+from anvil_release_qc.clients.toolkit import make_terra_workspace
+from anvil_release_qc.compare.engine import compare_coverage
+from anvil_release_qc.compare.report import CoverageReport
+from anvil_release_qc.compare.sources import BigQuerySnapshotSource, RawlsWorkspaceSource
+from anvil_release_qc.config import ResolvedTier
 
 
 def run_ingest_comparison(
@@ -38,11 +38,11 @@ def run_ingest_comparison(
     The submitter workspace is the reference; the comparison is driven from its table set, so TDR's
     harmonized ``anvil_*`` / ``file_inventory`` / ``workspace_attributes`` tables are out of scope.
     """
-    rawls = RawlsClient(tier.url("rawls"), token_provider, timeout=180)
+    workspace = make_terra_workspace(
+        tier, token_provider, submitter_namespace, submitter_workspace_name
+    )
     reference = RawlsWorkspaceSource(
-        rawls,
-        submitter_namespace,
-        submitter_workspace_name,
+        workspace,
         label=f"submitter workspace {submitter_namespace}/{submitter_workspace_name}",
     )
 

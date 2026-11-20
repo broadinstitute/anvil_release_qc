@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from anvil_data_qc.config import SERVICE_URLS, load_config, resolve_tier
+from anvil_release_qc.config import SERVICE_URLS, load_config, resolve_tier
 
 
 def _write(tmp_path: Path, text: str) -> Path:
@@ -21,7 +21,7 @@ default_tier: dev
 tiers:
   dev:
     email: dev-user@test.firecloud.org
-    adc_credentials_file: ~/.config/anvil-data-qc/adc-dev.json
+    adc_credentials_file: ~/.config/anvil-release-qc/adc-dev.json
     terra_billing_project: my-dev-billing
     billing_google_project_id: terra-dev-1234
   prod:
