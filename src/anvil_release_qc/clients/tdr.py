@@ -20,9 +20,7 @@ from __future__ import annotations
 
 import logging
 import time
-from typing import Optional
 
-from ops_utils.request_util import GET
 from ops_utils.tdr_utils.tdr_api_utils import TDR
 
 from anvil_release_qc.logging_setup import LOGGER_NAME
@@ -31,7 +29,7 @@ from anvil_release_qc.safety import SignedUrl
 logger = logging.getLogger(LOGGER_NAME)
 
 # Mirror the interactive UI's snapshot-export params (docs/tdr_export_flow.md), surfaced here so they
-# are a single, easy place to flip. ``exportGsPaths=false`` yields signed https URLs (what the Terra
+# are a single, easy place to flip (passed to the toolkit's ``TDR.export_snapshot``; ``signUrls`` keeps its default, true). ``exportGsPaths=false`` yields signed https URLs (what the Terra
 # import needs, vs gs:// paths); ``validatePrimaryKeyUniqueness=true`` validates primary-key uniqueness
 # during export -- a non-unique PK FAILS the export, which is a legitimate QC finding (flip to False if
 # it proves over-strict for some datasets).
@@ -45,28 +43,6 @@ JOB_FAILURE = "failed"
 
 #: ``include`` sections passed to the toolkit's ``TDR.get_snapshot_info`` (access info -> BigQuery location).
 SNAPSHOT_INCLUDE = ["ACCESS_INFORMATION", "SOURCES", "PROPERTIES"]
-
-
-def export_snapshot(
-    tdr: TDR,
-    snapshot_id: str,
-    *,
-    export_gs_paths: bool = EXPORT_GS_PATHS,
-    validate_primary_key_uniqueness: bool = VALIDATE_PRIMARY_KEY_UNIQUENESS,
-) -> dict:
-    """Start an async snapshot export; returns the TDR job (poll with ``wait_for_export_job``).
-
-    Custom: the toolkit's ``TDR`` has no snapshot-export call, so this uses its transport directly.
-    """
-    return tdr.request_util.run_request(
-        uri=f"{tdr.tdr_link}/snapshots/{snapshot_id}/export",
-        method=GET,
-        # requests renders Python bools as "True"/"False"; TDR expects lowercase.
-        params={
-            "exportGsPaths": str(export_gs_paths).lower(),
-            "validatePrimaryKeyUniqueness": str(validate_primary_key_uniqueness).lower(),
-        },
-    ).json()
 
 
 def wait_for_export_job(
@@ -96,22 +72,6 @@ def wait_for_export_job(
             raise TimeoutError(f"TDR export job {job_id} did not finish within {max_wait}s.")
         time.sleep(poll_interval)
 
-def snapshot_consent_code(snapshot: dict) -> Optional[str]:
-    """The snapshot's top-level ``consentCode``.
-
-    ``"NRES"`` (No Restrictions) means open-access; anything else -- including empty or missing -- is
-    controlled-access or unknown. Used by the safety gate (see ``anvil_release_qc.safety``).
-    """
-    return snapshot.get("consentCode")
-
-
-def snapshot_name(snapshot: dict) -> str:
-    name = snapshot.get("name")
-    if not name:
-        raise ValueError("Snapshot response is missing 'name'.")
-    return name
-
-
 def snapshot_bigquery_access(snapshot: dict) -> tuple[str, str]:
     """Return ``(bq_project, bq_dataset)`` from the snapshot's access information."""
     bq = (snapshot.get("accessInformation") or {}).get("bigQuery") or {}
@@ -122,15 +82,6 @@ def snapshot_bigquery_access(snapshot: dict) -> tuple[str, str]:
             "Snapshot is missing BigQuery access info (accessInformation.bigQuery.projectId/datasetName)."
         )
     return project, dataset
-
-
-def export_job_id(export_response: dict) -> str:
-    """Extract the TDR job id from a snapshot-export submit response (the ``id`` field)."""
-    job_id = export_response.get("id")
-    if not job_id:
-        raise ValueError(f"Could not find a job id in the TDR export response: {export_response}")
-    return job_id
-
 
 def export_manifest_url(result: dict) -> SignedUrl:
     """Return the signed ``manifest.json`` URL from a TDR export result, wrapped for containment.

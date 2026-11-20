@@ -27,6 +27,7 @@ from urllib.parse import urlsplit
 
 import requests
 from google.auth.credentials import Credentials
+from ops_utils.terra_util import TerraWorkspace
 
 from anvil_release_qc import __version__
 from anvil_release_qc.auth import assert_tier_identity, bearer_token, credentials_for_tier
@@ -47,14 +48,14 @@ from anvil_release_qc.clients.azul import AzulClient
 from anvil_release_qc.clients.firecloud import FirecloudClient, import_job_id
 from anvil_release_qc.clients.rawls import RawlsClient, workspace_auth_domains
 from anvil_release_qc.clients.tdr import (
+    EXPORT_GS_PATHS,
     SNAPSHOT_INCLUDE,
-    export_job_id,
+    VALIDATE_PRIMARY_KEY_UNIQUENESS,
     export_manifest_url,
-    export_snapshot,
     snapshot_bigquery_access,
     wait_for_export_job,
 )
-from anvil_release_qc.clients.toolkit import make_tdr
+from anvil_release_qc.clients.toolkit import make_tdr, make_terra_workspace
 from anvil_release_qc.compare.profile import TDR_SYSTEM_TABLES
 from anvil_release_qc.compare.qc import run_qc_comparison
 from anvil_release_qc.config import SERVICE_URLS, ResolvedTier, load_config, resolve_tier
@@ -101,7 +102,7 @@ def _http_status(exc: requests.exceptions.HTTPError) -> Optional[int]:
 
 
 def _create_workspace_resilient(
-    rawls: RawlsClient, namespace: str, name: str, *, description: str
+    rawls: RawlsClient, workspace: TerraWorkspace, *, description: str
 ) -> None:
     """Create the destination workspace, tolerating a slow/uncertain createWorkspace.
 
@@ -120,6 +121,7 @@ def _create_workspace_resilient(
     it is not the one we created -- refuse it (``SafetyError``) rather than import into an unexpected
     target.
     """
+    namespace, name = workspace.billing_project, workspace.workspace_name
     try:
         rawls.create_workspace(namespace, name, description=description)
         return
@@ -149,12 +151,7 @@ def _create_workspace_resilient(
     for attempt in range(1, WORKSPACE_ADOPT_ATTEMPTS + 1):
         ws = None
         try:
-            ws = rawls.get_workspace(
-                namespace,
-                name,
-                fields="workspace.authorizationDomain",
-                timeout=WORKSPACE_ADOPT_GET_TIMEOUT,
-            )
+            ws = workspace.get_workspace_info().json()
         except requests.exceptions.HTTPError as get_exc:
             status = _http_status(get_exc)
             retryable = status == 404 or (status is not None and status >= 500)
@@ -291,7 +288,15 @@ def _create_import_and_qc(
     try:
         with stage_timer("workspace_create", durations):
             _create_workspace_resilient(
-                rawls, tier.terra_billing_project, ws_name, description=description
+                rawls,
+                make_terra_workspace(
+                    tier,
+                    google_token,
+                    tier.terra_billing_project,
+                    ws_name,
+                    timeout=WORKSPACE_ADOPT_GET_TIMEOUT,
+                ),
+                description=description,
             )
         # Stable, greppable marker for the created workspace, logged BEFORE the import so it is present
         # even if the import later fails (the retained workspace still exists). The WDL parses it into the
@@ -628,8 +633,14 @@ def run_tdr_qc(
     # 2-3. TDR: export the snapshot (async) and obtain the signed manifest.json URL.
     durations: dict[str, float] = {}
     with stage_timer("tdr_export", durations):
-        job = export_snapshot(tdr, snapshot_id)
-        job_id = export_job_id(job)
+        job = tdr.export_snapshot(
+            snapshot_id,
+            export_gs_paths=EXPORT_GS_PATHS,
+            validate_primary_key_uniqueness=VALIDATE_PRIMARY_KEY_UNIQUENESS,
+        ).json()
+        job_id = job.get("id")
+        if not job_id:
+            raise ValueError(f"Could not find a job id in the TDR export response: {job}")
         logger.info("TDR export job submitted: %s", job_id)
         wait_for_export_job(tdr, job_id)
         signed_url = export_manifest_url(tdr.get_job_result(job_id).json())

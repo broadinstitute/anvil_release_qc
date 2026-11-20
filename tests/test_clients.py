@@ -10,11 +10,8 @@ from anvil_release_qc.clients.base import BaseClient
 from anvil_release_qc.clients.firecloud import FirecloudClient, import_job_id
 from anvil_release_qc.clients.rawls import workspace_auth_domains
 from anvil_release_qc.clients.tdr import (
-    export_job_id,
     export_manifest_url,
-    export_snapshot,
     snapshot_bigquery_access,
-    snapshot_name,
     wait_for_export_job,
 )
 from anvil_release_qc.clients.toolkit import GuardedRunRequest
@@ -163,36 +160,14 @@ def test_submit_import_job_tdrexport_options(monkeypatch):
 # --- TDR snapshot export (tdr-qc) ---
 
 
-class _FakeRequestUtil:
-    def __init__(self):
-        self.calls = []
-
-    def run_request(self, uri, method, **kwargs):
-        self.calls.append((method, uri, kwargs.get("params")))
-        return _Resp({"id": "job-1", "job_status": "running", "status_code": 202})
-
-
 class _FakeTdr:
     """Stand-in for the toolkit's TDR: replays get_job_status payloads."""
 
-    tdr_link = "https://tdr.example/api/repository/v1"
-
     def __init__(self, statuses=()):
-        self.request_util = _FakeRequestUtil()
         self._statuses = iter(statuses)
 
     def get_job_status(self, job_id):
         return _Resp(next(self._statuses))
-
-
-def test_tdr_export_snapshot_params():
-    tdr = _FakeTdr()
-    job = export_snapshot(tdr, "snap-1")
-    assert export_job_id(job) == "job-1"
-    method, uri, params = tdr.request_util.calls[0]
-    assert method == "GET" and uri == "https://tdr.example/api/repository/v1/snapshots/snap-1/export"
-    # Bools must be lowercase strings for TDR (not Python's "True"/"False").
-    assert params == {"exportGsPaths": "false", "validatePrimaryKeyUniqueness": "true"}
 
 
 def test_tdr_wait_for_export_job_succeeds(monkeypatch):
@@ -238,12 +213,6 @@ def test_tdr_wait_for_export_job_times_out(monkeypatch):
     with pytest.raises(TimeoutError):
         wait_for_export_job(tdr, "job-1", poll_interval=0, max_wait=0)
 
-
-def test_export_job_id_missing_raises():
-    with pytest.raises(ValueError):
-        export_job_id({"job_status": "running"})
-
-
 def test_export_manifest_url_extracts_signed_manifest():
     bucket = "https://storage.googleapis.com/datarepo-abc-snapshot-export-bucket/job1"
     result = {
@@ -288,7 +257,6 @@ def test_tdr_snapshot_extraction():
             "bigQuery": {"projectId": "datarepo-183d3f73", "datasetName": "anvil_x"}
         },
     }
-    assert snapshot_name(snap) == "ANVIL_CCDG_x"
     assert snapshot_bigquery_access(snap) == ("datarepo-183d3f73", "anvil_x")
 
 
