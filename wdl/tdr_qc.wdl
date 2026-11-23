@@ -70,10 +70,11 @@ task tdr_qc {
         Boolean allow_controlled_access
         Boolean keep_workspace
         String docker
-        Int cpu = 1
-        Int memory_gb = 4
-        Int disk_gb = 20
     }
+
+    Int cpu = 1
+    Int memory_gb = 4
+    Int disk_gb = 20
 
     command <<<
         set -euo pipefail
