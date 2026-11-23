@@ -10,7 +10,7 @@ azure-identity==1.17.1
 azure-storage-blob==12.21.0
 backoff==2.2.1
 beautifulsoup4==4.15.0
-certifi==2026.5.20
+certifi==2026.10.18
 cffi==2.0.0
 charset-normalizer==3.4.7
 cryptography==48.0.1
