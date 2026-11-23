@@ -25,7 +25,7 @@ workflow TdrQc {
         Boolean dry_run = false
         Boolean allow_controlled_access = false
         Boolean keep_workspace = false
-        String docker = "us-central1-docker.pkg.dev/operations-portal-427515/anvil-qc/anvil-release-qc:0.3.6"
+        String docker = "us-central1-docker.pkg.dev/operations-portal-427515/anvil-qc/anvil-release-qc:0.3.7"
     }
 
     call tdr_qc {
