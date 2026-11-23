@@ -44,11 +44,11 @@ workflow AnvilDataExplorerQc {
     }
 
     output {
-        File tdr_qc_report = anvil_data_explorer_qc.qc_report
-        File tdr_detailed_log = anvil_data_explorer_qc.detailed_log
-        Boolean tdr_qc_passed = anvil_data_explorer_qc.qc_passed
-        String tdr_workspace_namespace = anvil_data_explorer_qc.workspace_namespace
-        String tdr_workspace_name = anvil_data_explorer_qc.workspace_name
+        File ade_qc_report = anvil_data_explorer_qc.ade_qc_report
+        File ade_detailed_log = anvil_data_explorer_qc.ade_detailed_log
+        Boolean ade_qc_passed = anvil_data_explorer_qc.ade_qc_passed
+        String ade_workspace_namespace = anvil_data_explorer_qc.ade_workspace_namespace
+        String ade_workspace_name = anvil_data_explorer_qc.ade_workspace_name
     }
 
     parameter_meta {
