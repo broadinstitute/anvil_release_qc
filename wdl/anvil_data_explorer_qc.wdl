@@ -20,8 +20,8 @@ workflow AnvilDataExplorerQc {
         String billing_project = "anvil-developer-work"
         String billing_google_project_id = "terra-ec38e08d"
         String snapshot_id
-        String? tier
-        String? catalog
+        String tier = "prod"
+        String catalog
         Boolean dry_run = false
         Boolean allow_controlled_access = false
         Boolean keep_workspace = false
@@ -44,11 +44,11 @@ workflow AnvilDataExplorerQc {
     }
 
     output {
-        File qc_report = anvil_data_explorer_qc.qc_report
-        File detailed_log = anvil_data_explorer_qc.detailed_log
-        Boolean qc_passed = anvil_data_explorer_qc.qc_passed
-        String workspace_namespace = anvil_data_explorer_qc.workspace_namespace
-        String workspace_name = anvil_data_explorer_qc.workspace_name
+        File tdr_qc_report = anvil_data_explorer_qc.qc_report
+        File tdr_detailed_log = anvil_data_explorer_qc.detailed_log
+        Boolean tdr_qc_passed = anvil_data_explorer_qc.qc_passed
+        String tdr_workspace_namespace = anvil_data_explorer_qc.workspace_namespace
+        String tdr_workspace_name = anvil_data_explorer_qc.workspace_name
     }
 
     parameter_meta {
@@ -70,17 +70,18 @@ task anvil_data_explorer_qc {
         String billing_project
         String billing_google_project_id
         String snapshot_id
-        String? tier
-        String? catalog
+        String tier
+        String catalog
         Boolean dry_run
         Boolean allow_controlled_access
         Boolean keep_workspace
         String azul_token_bucket
         String docker
-        Int cpu = 1
-        Int memory_gb = 4
-        Int disk_gb = 20
     }
+
+    Int cpu = 1
+    Int memory_gb = 4
+    Int disk_gb = 20
 
     command <<<
         set -euo pipefail
@@ -135,12 +136,12 @@ task anvil_data_explorer_qc {
     }
 
     output {
-        File qc_report = "qc_report.txt"
-        File detailed_log = "detailed_log.txt"
-        Boolean qc_passed = read_int("qc_exit_code.txt") == 0
+        File ade_qc_report = "qc_report.txt"
+        File ade_detailed_log = "detailed_log.txt"
+        Boolean ade_qc_passed = read_int("qc_exit_code.txt") == 0
         # The created Analysis Workspace (namespace/name); empty if none was created (dry run /
         # pre-import failure). Present even on a failed import (the retained workspace exists).
-        String workspace_namespace = read_string("workspace_namespace.txt")
-        String workspace_name = read_string("workspace_name.txt")
+        String ade_workspace_namespace = read_string("workspace_namespace.txt")
+        String ade_workspace_name = read_string("workspace_name.txt")
     }
 }
