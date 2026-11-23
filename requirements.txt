@@ -10,10 +10,10 @@ azure-identity==1.17.1
 azure-storage-blob==12.21.0
 backoff==2.2.1
 beautifulsoup4==4.15.0
-certifi==2026.10.18
+certifi==2026.5.20
 cffi==2.0.0
 charset-normalizer==3.4.7
-cryptography==50.0.0
+cryptography==48.0.1
 db-dtypes==1.9.0
 deprecated==3.0.1
 frozenlist==1.8.0
@@ -59,14 +59,14 @@ propcache==0.5.4
 proto-plus==1.28.0
 protobuf==7.35.0
 pyarrow==26.0.1
-pyasn1==0.6.5
+pyasn1==0.6.3
 pyasn1-modules==0.4.2
 pycparser==3.0
 pydantic==2.13.4
 pydantic-core==2.46.4
 pygments==2.20.0
 pyjwt==2.15.1
-pyops-service-toolkit @ git+https://github.com/broadinstitute/pyops-service-toolkit.git@8af7f03
+pyops-service-toolkit @ git+https://github.com/broadinstitute/pyops-service-toolkit.git@v12.23.1#egg=pyops-service-toolkit
 pyparsing==3.3.3
 python-dateutil==2.9.0.post0
 pytz==2026.6
@@ -84,7 +84,7 @@ typer==0.26.7
 typing-extensions==4.15.0
 typing-inspection==0.4.2
 uritemplate==4.2.0
-urllib3==2.8.0
+urllib3==2.7.0
 wheel==0.48.0
 wrapt==2.5.2
 yarl==1.25.1
