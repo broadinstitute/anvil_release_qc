@@ -42,7 +42,7 @@ token, no `azul-login`.** The signed manifest/parquet URLs are produced and sign
 account; the Terra import service fetches them server-side.
 
 **Auth preflight (`--verify-auth`).** `anvil-release-qc tdr-qc --snapshot-id <id> --tier <t> --verify-auth`
-runs the identity guard, reads the snapshot (confirming entitlement), and checks the consent gate, then
+resolves the Terra user (via Sam), reads the snapshot (confirming entitlement), and checks the consent gate, then
 prints a `✓ AUTH VERIFIED` line and exits — **before any export or signed URL**. A quick, side-effect-free
 confidence check, especially when switching between accounts/tiers/data programs. (Same flag on `ade-qc`,
 where it also validates the Azul token.)

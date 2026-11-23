@@ -124,6 +124,43 @@ def test_import_added_aw_table_ignored():
     assert all(t.name != "duos_dataset_registration" for t in report.tables)
 
 
+def test_file_inventory_skipped_not_failed():
+    # file_inventory is never imported into the AW -- skipped (not MISSING), and noted in the report.
+    ref = {"t": _shape(10, 3, 3), "file_inventory": _shape(5000, 8, 8)}
+    report = _compare(ref, {"t": _shape(10, 3)})
+    assert report.passed
+    assert report.not_imported_tables == ["file_inventory"]
+    assert all(t.name != "file_inventory" for t in report.tables)
+    assert "SKIPPED — file_inventory: not imported" in report.render()
+
+
+def test_table_over_row_limit_skipped_not_failed():
+    # > 350k rows is too large for Terra to import: skipped whether the AW has it or not, never failed.
+    ref = {"t": _shape(10, 3, 3), "big": _shape(350_001, 4, 4), "huge": _shape(2_000_000, 4, 4)}
+    cand = {"t": _shape(10, 3), "big": _shape(12, 4)}  # a partial AW table is not judged either
+    report = _compare(ref, cand)
+    assert report.passed
+    assert report.too_large_tables == {"big": 350_001, "huge": 2_000_000}
+    assert [t.name for t in report.tables] == ["t"]
+    text = report.render()
+    assert "SKIPPED — big: 350,001 rows in TDR exceeds the 350,000-row Terra import limit" in text
+    assert "SKIPPED — huge: 2,000,000 rows" in text
+
+
+def test_table_at_row_limit_still_compared():
+    # Exactly 350k rows is within the limit, so it is compared (and fails if missing).
+    report = _compare({"t": _shape(350_000, 3, 3)}, {})
+    assert not report.passed
+    assert report.too_large_tables == {}
+
+
+def test_row_limit_is_a_profile_knob():
+    profile = ComparisonProfile(max_importable_table_rows=100)
+    report = _compare({"t": _shape(101, 3, 3)}, {}, profile)
+    assert report.passed
+    assert report.too_large_tables == {"t": 101}
+
+
 # --- compare_coverage (ingestion QC: submitter workspace -> TDR) ---
 
 

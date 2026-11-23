@@ -29,7 +29,6 @@ from anvil_release_qc.config import ResolvedTier
 def _tier():
     return ResolvedTier(
         name="prod",
-        email="op@broadinstitute.org",
         adc_credentials_file=None,
         terra_billing_project="anvil-developer-work",
         billing_google_project_id="terra-xxxx",
@@ -443,64 +442,62 @@ def test_launch_policies():
 # --- Azul token gate ---
 
 
-def test_check_azul_token_not_set():
-    client = FakeClient(ws_attrs={})
-    ok, detail = check_azul_token(client, object(), _tier(), 2100)
-    assert ok is False and "not set" in detail
+_TOKEN_URI = "gs://b/azul_token/op.txt"
+
+
+def test_check_azul_token_no_location():
+    ok, detail = check_azul_token(object(), _tier(), None, 2100)
+    assert ok is False and "location" in detail
 
 
 def test_check_azul_token_ok(monkeypatch):
-    client = FakeClient(ws_attrs={"anvil_data_qc_azul_token": "gs://b/tok.txt"})
-    monkeypatch.setattr(runner, "read_gcs_text", lambda creds, uri: "the-token")
+    monkeypatch.setattr(runner, "read_azul_token", lambda creds, uri: "the-token")
     monkeypatch.setattr(runner, "expected_client_id", lambda tier: "cid")
     monkeypatch.setattr(
         runner, "validate_azul_token", lambda *a, **k: {"email": "op@x.org", "expires_in": 3000}
     )
-    ok, detail = check_azul_token(client, object(), _tier(), 2100)
+    ok, detail = check_azul_token(object(), _tier(), _TOKEN_URI, 2100)
     assert ok is True and "op@x.org" in detail
 
 
-def test_check_azul_token_strips_comment_header(monkeypatch):
-    # The token file (as azul-login writes it, and as uploaded to GCS) has a #-comment header above the
-    # token line. check_azul_token must validate the token LINE, not the whole file text.
-    file_text = (
-        "# Azul access token for tier 'prod' — SECRET.\n"
-        "# account: sa-user@broadinstitute.org   azp: cid\n"
-        "\n"
-        "the-real-token\n"  # placeholder (not a real ya29.* token) so git-secrets doesn't flag it
-    )
-    client = FakeClient(ws_attrs={"anvil_data_qc_azul_token": "gs://b/tok.txt"})
-    monkeypatch.setattr(runner, "read_gcs_text", lambda creds, uri: file_text)
-    monkeypatch.setattr(runner, "expected_client_id", lambda tier: "cid")
+def test_check_azul_token_reads_the_given_uri(monkeypatch):
     seen = {}
 
-    def _capture(token, **kwargs):
-        seen["token"] = token
-        return {"email": "sa-user@broadinstitute.org", "expires_in": 3000}
+    def _read(creds, uri):
+        seen["uri"] = uri
+        return "the-real-token"
 
-    monkeypatch.setattr(runner, "validate_azul_token", _capture)
-    ok, detail = check_azul_token(client, object(), _tier(), 2100)
-    assert ok is True
-    assert seen["token"] == "the-real-token"  # bare token line, header stripped
+    monkeypatch.setattr(runner, "read_azul_token", _read)
+    monkeypatch.setattr(runner, "expected_client_id", lambda tier: "cid")
+    monkeypatch.setattr(runner, "validate_azul_token", lambda token, **k: {"email": "op@x.org"})
+    assert check_azul_token(object(), _tier(), _TOKEN_URI, 2100)[0] is True
+    assert seen["uri"] == _TOKEN_URI
 
 
-def test_check_azul_token_only_comments_not_usable(monkeypatch):
-    client = FakeClient(ws_attrs={"anvil_data_qc_azul_token": "gs://b/tok.txt"})
-    monkeypatch.setattr(runner, "read_gcs_text", lambda creds, uri: "# only a header\n\n")
-    ok, detail = check_azul_token(client, object(), _tier(), 2100)
-    assert ok is False and "no token line" in detail
+def test_check_azul_token_absent_not_usable(monkeypatch):
+    monkeypatch.setattr(runner, "read_azul_token", lambda creds, uri: None)
+    ok, detail = check_azul_token(object(), _tier(), _TOKEN_URI, 2100)
+    assert ok is False and _TOKEN_URI in detail and "azul-login" in detail
+
+
+def test_check_azul_token_unreadable_not_usable(monkeypatch):
+    def _boom(creds, uri):
+        raise runner.AzulTokenError(f"Could not read the Azul token at {uri}: 403")
+
+    monkeypatch.setattr(runner, "read_azul_token", _boom)
+    ok, detail = check_azul_token(object(), _tier(), _TOKEN_URI, 2100)
+    assert ok is False and "403" in detail
 
 
 def test_check_azul_token_fails_validation(monkeypatch):
-    client = FakeClient(ws_attrs={"anvil_data_qc_azul_token": "gs://b/tok.txt"})
-    monkeypatch.setattr(runner, "read_gcs_text", lambda creds, uri: "the-token")
+    monkeypatch.setattr(runner, "read_azul_token", lambda creds, uri: "the-token")
     monkeypatch.setattr(runner, "expected_client_id", lambda tier: "cid")
 
     def _boom(*a, **k):
         raise runner.AzulTokenError("expires in 100s (need > 2100s)")
 
     monkeypatch.setattr(runner, "validate_azul_token", _boom)
-    ok, detail = check_azul_token(client, object(), _tier(), 2100)
+    ok, detail = check_azul_token(object(), _tier(), _TOKEN_URI, 2100)
     assert ok is False and "2100" in detail
 
 

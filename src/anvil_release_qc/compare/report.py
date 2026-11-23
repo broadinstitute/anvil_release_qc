@@ -6,7 +6,7 @@ checks) and renders to a clear, scannable block (for the WDL log and CLI).
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 
@@ -56,6 +56,11 @@ class ComparisonReport:
     tdr_system_tables: list[str]  # TDR-only internals, excluded (e.g. datarepo_row_ids)
     # AW-only import artifacts, excluded (e.g. duos_dataset_registration)
     import_added_aw_tables: list[str]
+    # TDR tables never imported into the AW, skipped -- not a failure (e.g. file_inventory)
+    not_imported_tables: list[str] = field(default_factory=list)
+    # TDR tables too large for Terra to import ({name: TDR row count}), skipped -- not a failure
+    too_large_tables: dict[str, int] = field(default_factory=dict)
+    max_importable_table_rows: Optional[int] = None
 
     @property
     def passed(self) -> bool:
@@ -90,6 +95,17 @@ class ComparisonReport:
         if self.import_added_aw_tables:
             lines.append(
                 f"  excluded — import-added AW tables (no TDR counterpart): {self.import_added_aw_tables}"
+            )
+        for name in self.not_imported_tables:
+            lines.append(
+                f"  SKIPPED — {name}: not imported into the AW by design, so not compared "
+                f"(not a failure)"
+            )
+        for name, rows in self.too_large_tables.items():
+            lines.append(
+                f"  SKIPPED — {name}: {rows:,} rows in TDR exceeds the "
+                f"{self.max_importable_table_rows:,}-row Terra import limit, so it cannot be imported "
+                f"and was not compared (not a failure)"
             )
         return "\n".join(lines)
 

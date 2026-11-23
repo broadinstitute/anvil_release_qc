@@ -4,23 +4,23 @@ version 1.0
 # snapshot (table parity + row/column counts + auth-domain), without re-importing. Runs
 # `anvil-release-qc compare` -- useful to re-QC a workspace a prior `qc` run created.
 #
-# Credentials: the ambient Terra runtime service account (ADC), whose email must match the configured
-# tier email (the CLI identity guard); config supplied as a File input. The task always succeeds and
+# Credentials: the ambient Terra runtime service account (ADC); no config file --
+# billing_google_project_id defaults to the prod value (override it for dev). The task always succeeds and
 # surfaces the result as outputs (qc_passed + qc_exit_code) so batch runs always produce the report.
 
 workflow Compare {
     input {
-        File config
+        String billing_google_project_id = "terra-ec38e08d"
         String workspace_namespace
         String workspace_name
         String snapshot_id
         String? tier
-        String docker = "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-release-qc:0.3.5"
+        String docker = "us-central1-docker.pkg.dev/operations-portal-427515/anvil-qc/anvil-release-qc:0.3.6"
     }
 
     call compare {
         input:
-            config = config,
+            billing_google_project_id = billing_google_project_id,
             workspace_namespace = workspace_namespace,
             workspace_name = workspace_name,
             snapshot_id = snapshot_id,
@@ -38,18 +38,18 @@ workflow Compare {
     }
 
     parameter_meta {
-        config: "Per-tier config.yaml (set adc_credentials_file: null for deployment)."
+        billing_google_project_id: "Google Cloud project id that BigQuery jobs run in / are billed to. Default terra-ec38e08d (prod); override for dev."
         workspace_namespace: "Analysis Workspace namespace (Terra billing project)."
         workspace_name: "Analysis Workspace name."
         snapshot_id: "TDR snapshot id (the source of truth)."
-        tier: "Tier (dev|prod). Optional; defaults to the config's default_tier."
+        tier: "Tier (dev|prod). Optional; defaults to prod."
         docker: "anvil-release-qc image reference, e.g. <registry>/anvil-release-qc:<tag>."
     }
 }
 
 task compare {
     input {
-        File config
+        String billing_google_project_id
         String workspace_namespace
         String workspace_name
         String snapshot_id
@@ -64,7 +64,7 @@ task compare {
         set -euo pipefail
 
         # stdout -> the report; stderr -> the detailed request/response log. Capture the exit code
-        # without failing the task. 0 = PASS, 1 = QC failure, 2 = safety abort or a preflight/config
+        # without failing the task. 0 = PASS, 1 = QC failure, 2 = safety abort or a preflight
         # failure (e.g. a misconfigured billing_google_project_id).
         # Run start/end wall-clock (UTC, ISO 8601 to the second) bracketing the CLI invocation, surfaced
         # as data-table columns for QC management (sort by run time / track when each check last ran).
@@ -73,7 +73,7 @@ task compare {
         date -u '+%Y-%m-%dT%H:%M:%SZ' > run_began.txt
         set +e
         anvil-release-qc compare \
-            --config "~{config}" \
+            --billing-google-project-id "~{billing_google_project_id}" \
             --snapshot-id "~{snapshot_id}" \
             --workspace-namespace "~{workspace_namespace}" \
             --workspace-name "~{workspace_name}" \

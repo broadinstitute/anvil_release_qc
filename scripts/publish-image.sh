@@ -4,7 +4,7 @@
 # Prerequisites (one-time -- see wdl/README.md, "Publish the image to GAR"):
 #   - the GAR repo exists:
 #       gcloud artifacts repositories create anvil-qc --repository-format=docker \
-#         --location=us-central1 --project=dsp-sa-development
+#         --location=us-central1 --project=operations-portal-427515
 #   - docker is authenticated to GAR:
 #       gcloud auth configure-docker us-central1-docker.pkg.dev
 #

@@ -5,11 +5,13 @@ access token whose ``azp`` (authorized party) equals Azul's own OAuth client id 
 ``DataBiosphere/azul`` ``src/azul/oauth2.py`` ``CredentialedClient.validate``). Azul's client is a
 confidential web client whose secret lives only in Azul's backend, so we cannot mint such a token
 ourselves — the token is obtained by an interactive browser login (the ``azul-login`` CLI helper) and
-stored per tier. It is a short-lived (~1 h), non-refreshable access token, used only in the (short)
+stored per operator in GCS at ``gs://<bucket>/azul_token/<username>.txt`` (``azul_token_uri``), where
+every run -- local or in a Terra workflow -- reads it for the Sam-resolved user running it. It is a short-lived (~1 h), non-refreshable access token, used only in the (short)
 Azul phase; the long Terra phase rides the auto-refreshing gcloud ADC token.
 
 This module:
-- reads/writes the per-tier token file (``read_azul_token`` / ``write_azul_token``),
+- locates, reads and writes each operator's token in GCS (``azul_token_uri`` / ``read_azul_token`` /
+  ``write_azul_token``),
 - validates a token via Google ``tokeninfo`` exactly as Azul does — ``azp``, account email, and
   expiry (``validate_azul_token``), so "passes our check" ⇒ "Azul will accept it",
 - discovers the tier's expected ``azp`` from Azul's served Swagger initializer
@@ -24,15 +26,23 @@ from __future__ import annotations
 import logging
 import re
 from datetime import datetime, timedelta, timezone
-from pathlib import Path
-from typing import Collection, Optional
+from typing import Optional
 
 import requests
+from google.auth.credentials import Credentials
 
 from anvil_release_qc.config import ResolvedTier
+from anvil_release_qc.gcs import read_gcs_text_if_exists, write_gcs_text
 from anvil_release_qc.logging_setup import LOGGER_NAME
 
 logger = logging.getLogger(LOGGER_NAME)
+
+#: Default GCS bucket holding each operator's Azul token (a secure, auth-domain-protected Terra
+#: workspace bucket). The WDL's ``azul_token_bucket`` input / ``--azul-token-bucket`` flag override it.
+DEFAULT_AZUL_TOKEN_BUCKET = "fc-secure-886bea29-8c4e-4568-920a-a8cfee18e659"
+
+#: Folder within the bucket that holds the per-user token files.
+AZUL_TOKEN_PREFIX = "azul_token"
 
 # Google's token introspection endpoint — the same one Azul's validate() uses.
 TOKENINFO_URL = "https://www.googleapis.com/oauth2/v3/tokeninfo"
@@ -155,18 +165,13 @@ def validate_azul_token(
     token: str,
     *,
     expected_azp: str,
-    allowed_emails: Optional[Collection[str]] = None,
     min_remaining_seconds: int = 0,
 ) -> dict:
     """Validate an Azul access token the way Azul does; raise ``AzulTokenError`` if it won't work.
 
-    Checks (via ``tokeninfo``): ``azp`` == the Azul OAuth client, that the token's account is one of
-    ``allowed_emails``, and at least ``min_remaining_seconds`` of life left. Returns the tokeninfo
-    dict on success.
-
-    Email check: ``allowed_emails=None`` skips it (caller doesn't constrain the account); a *provided*
-    collection is enforced, and an empty one rejects every account (fail-closed, matching the identity
-    guard). Callers pass ``tier.authorized_emails``, which always contains the required tier ``email``.
+    Checks (via ``tokeninfo``): ``azp`` == the Azul OAuth client, and at least ``min_remaining_seconds``
+    of life left. Returns the tokeninfo dict on success; callers log its ``email`` (the token's owner)
+    for the audit trail. The account itself is not restricted -- Azul grants or denies data access.
     """
     info = tokeninfo(token)
     azp = info.get("azp")
@@ -176,14 +181,6 @@ def validate_azul_token(
             "Azul will reject it — copy the token from the Azul Swagger UI (it must be issued to "
             "Azul's own client), e.g. via `anvil-release-qc azul-login`."
         )
-    if allowed_emails is not None:
-        token_email = (info.get("email") or "").lower()
-        allowed = {e.lower() for e in allowed_emails}
-        if token_email not in allowed:
-            raise AzulTokenError(
-                f"Token belongs to '{info.get('email')}', which is not an authorized account for this "
-                f"tier ({sorted(allowed)}). Log in to Azul as an authorized account."
-            )
     remaining = int(info.get("expires_in", 0))
     if remaining <= min_remaining_seconds:
         raise AzulTokenError(
@@ -226,43 +223,53 @@ def token_from_file_text(text: str) -> Optional[str]:
     return None
 
 
-def read_azul_token(tier: ResolvedTier, *, override_path: Optional[str] = None) -> Optional[str]:
-    """Read the Azul access token, or ``None`` if none is configured.
+def azul_token_uri(user_email: str, bucket: Optional[str] = None) -> str:
+    """Where ``user_email``'s Azul token lives: ``gs://<bucket>/azul_token/<username>.txt``.
 
-    ``override_path`` (e.g. a WDL-localized token file passed via ``--azul-token-file``) takes
-    precedence over the tier's configured ``azul_token_file``. Returns ``None`` when neither is set, or
-    the file is empty / only comments (the caller may then call Azul anonymously — open-access only).
-    Otherwise returns the first non-comment, non-blank line (the token). The token is an opaque Google
-    access token, so it is not shape-checked here; ``validate_azul_token`` does the real validation.
+    ``username`` is the part of the (Sam-resolved, human) Terra user email before the ``@`` -- so a
+    workflow running as a pet service account finds its owner's token.
     """
-    token_file = override_path or tier.azul_token_file
-    if not token_file:
-        return None
-    path = Path(token_file).expanduser()
-    if not path.exists():
-        raise FileNotFoundError(
-            f"Azul token file not found: {path}. Run `anvil-release-qc azul-login`."
-        )
-    return token_from_file_text(path.read_text())  # present but empty / only comments -> None
+    username = user_email.split("@", 1)[0].strip()
+    if not username:
+        raise AzulTokenError(f"Cannot derive a username from {user_email!r}.")
+    return f"gs://{bucket or DEFAULT_AZUL_TOKEN_BUCKET}/{AZUL_TOKEN_PREFIX}/{username}.txt"
 
 
-def write_azul_token(tier: ResolvedTier, token: str, info: dict) -> Path:
-    """Write the validated token to the tier's token file (0600) with a human-readable header."""
-    if not tier.azul_token_file:
+def read_azul_token(creds: Credentials, token_uri: str) -> Optional[str]:
+    """Read the Azul access token at ``token_uri``, or ``None`` if there is none.
+
+    Returns ``None`` when the object does not exist or holds no token line (the caller then calls Azul
+    anonymously -- open-access only). Raises ``AzulTokenError`` when the object can't be read (e.g. no
+    read access to the bucket). The token is not shape-checked here; ``validate_azul_token`` does that.
+    """
+    try:
+        text = read_gcs_text_if_exists(creds, token_uri)  # SECRET -- never log
+    except requests.RequestException as exc:
         raise AzulTokenError(
-            f"Tier '{tier.name}' has no 'azul_token_file' configured; set it before azul-login."
-        )
-    path = Path(tier.azul_token_file).expanduser()
-    path.parent.mkdir(parents=True, exist_ok=True)
+            f"Could not read the Azul token at {token_uri}: {exc}. Does the running account have read "
+            "access to that bucket?"
+        ) from exc
+    return token_from_file_text(text) if text is not None else None
+
+
+def write_azul_token(
+    creds: Credentials, token_uri: str, tier: ResolvedTier, token: str, info: dict
+) -> str:
+    """Upload the validated token to ``token_uri`` with a human-readable header; return the URI."""
     now = datetime.now(timezone.utc)
     expires = now + timedelta(seconds=int(info.get("expires_in", 0)))
     header = (
-        f"# Azul access token for tier '{tier.name}' — SECRET, DO NOT COMMIT.\n"
+        f"# Azul access token for tier '{tier.name}' — SECRET, DO NOT COMMIT OR SHARE.\n"
         f"# account: {info.get('email')}   azp: {info.get('azp')}\n"
         f"# acquired: {now.isoformat(timespec='seconds')}   "
         f"expires: {expires.isoformat(timespec='seconds')}\n"
         f"# refresh with:  anvil-release-qc azul-login --tier {tier.name}\n"
     )
-    path.write_text(header + token + "\n")
-    path.chmod(0o600)
-    return path
+    try:
+        write_gcs_text(creds, token_uri, header + token + "\n")
+    except requests.RequestException as exc:
+        raise AzulTokenError(
+            f"Could not upload the Azul token to {token_uri}: {exc}. Does your account have write "
+            "access to that bucket?"
+        ) from exc
+    return token_uri

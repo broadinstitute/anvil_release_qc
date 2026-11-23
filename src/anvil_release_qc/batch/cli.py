@@ -4,10 +4,10 @@ list via the Terra submissions API, capped at a small concurrency.
     qc-batch-runner --tier prod --table anvil15_qc --pipeline ade_qc --snapshots priorityA.tsv \
         [--max-concurrent 5] [--dry-run] [--force] [--run-skipped] \
         [--on-stale-token auto|prompt|wait] \
-        [--qc-workspace-name anvil-data-qc-shared] [--config config/config.yaml]
+        [--qc-workspace-name anvil-data-qc-shared] [--billing-project <ns>] [--config <local yaml>]
     qc-batch-runner --tier prod --table anvil15_qc --pipeline ade_qc --verify-auth   # auth preflight only
 
-Reuses the repo's config, identity guard, Azul-token validation, logging, and redaction. The per-dataset
+Reuses the repo's settings resolution, Terra-user resolution, Azul-token validation, logging, and redaction. The per-dataset
 QC verdicts land in the data-table columns as usual; this tool orchestrates and reports. Deliberately a
 separate tool/CLI from ``anvil-release-qc`` (a distinct layer). Kept Python 3.10-compatible.
 """
@@ -24,12 +24,7 @@ import typer
 from google.auth.exceptions import DefaultCredentialsError, RefreshError
 
 from anvil_release_qc import __version__
-from anvil_release_qc.auth import (
-    IdentityMismatchError,
-    assert_tier_identity,
-    bearer_token,
-    credentials_for_tier,
-)
+from anvil_release_qc.auth import bearer_token, credentials_for_tier, resolve_tier_identity
 from anvil_release_qc.batch.runner import (
     DEFAULT_MAX_CONCURRENT,
     PIPELINE_METHOD_CONFIG,
@@ -39,7 +34,9 @@ from anvil_release_qc.batch.runner import (
     run_verify_auth,
 )
 from anvil_release_qc.batch.terra import TerraWorkspaceClient
-from anvil_release_qc.config import load_config, resolve_tier
+from anvil_release_qc.azul_auth import azul_token_uri
+from anvil_release_qc.cli import AZUL_TOKEN_BUCKET_OPT, BILLING_PROJECT_OPT, CONFIG_OPT, TIER_OPT
+from anvil_release_qc.config import resolve_settings
 from anvil_release_qc.logging_setup import LOGGER_NAME, log_run_start, setup_logging
 
 logger = logging.getLogger(LOGGER_NAME)
@@ -72,13 +69,13 @@ def _read_snapshot_ids(tsv_path: Path) -> list:
 def _terra_http_error_message(
     exc: requests.exceptions.HTTPError, tier_name: str, workspace: str
 ) -> str:
-    """A friendly message for a Terra API HTTPError during preflight (e.g. an authorized account that
+    """A friendly message for a Terra API HTTPError during preflight (e.g. an account that
     hasn't been granted access to the shared workspace) — used instead of a raw traceback."""
     status = getattr(getattr(exc, "response", None), "status_code", None)
     if status == 403:
         return (
             f"Access denied (HTTP 403) to Terra workspace {workspace} (tier '{tier_name}'). The active "
-            "account passed the identity guard but lacks access to this workspace and/or its data — ask "
+            "account lacks access to this workspace and/or its data — ask "
             "the workspace owner to grant it access, then retry."
         )
     if status == 404:
@@ -102,16 +99,15 @@ def main(
         "-s",
         help="TSV file with a 'snapshot_id' column (the rows to process). Required unless --verify-auth.",
     ),
-    tier: Optional[str] = typer.Option(
-        None, "--tier", "-t", help="Tier (dev|prod). Defaults to the config's default_tier."
-    ),
-    config: Path = typer.Option(
-        Path("config/config.yaml"), "--config", "-c", help="Path to the YAML config file."
-    ),
+    tier: Optional[str] = TIER_OPT,
+    config: Optional[Path] = CONFIG_OPT,
+    billing_project: Optional[str] = BILLING_PROJECT_OPT,
+    azul_token_bucket: str = AZUL_TOKEN_BUCKET_OPT,
     qc_workspace_name: Optional[str] = typer.Option(
         None,
         "--qc-workspace-name",
-        help="Override the config's qc_workspace_name (the shared QC workspace to submit into).",
+        help="The shared QC workspace to submit into (its namespace is --billing-project). Overrides "
+        "the local config's qc_workspace_name.",
     ),
     max_concurrent: int = typer.Option(
         DEFAULT_MAX_CONCURRENT, "--max-concurrent", help="Max concurrent workflows (default 5)."
@@ -152,12 +148,14 @@ def main(
             "--snapshots is required (a TSV with a 'snapshot_id' column), unless --verify-auth."
         )
 
-    cfg = load_config(config)
-    resolved = resolve_tier(cfg, tier)
+    # Only the shared workspace's namespace is needed (no BigQuery here).
+    resolved = resolve_settings(
+        config, tier, terra_billing_project=billing_project, require=("terra_billing_project",)
+    )
     workspace_name = qc_workspace_name or resolved.qc_workspace_name
     if not workspace_name:
         raise typer.BadParameter(
-            "No QC workspace name: set qc_workspace_name in the tier config or pass --qc-workspace-name."
+            "No QC workspace name: pass --qc-workspace-name (or set qc_workspace_name in the local config)."
         )
 
     _logger, log_file = setup_logging(Path("logs"), resolved.name, f"batch-{pipeline}")
@@ -186,7 +184,9 @@ def main(
         def google_token() -> str:
             return bearer_token(creds)
 
-        identity = assert_tier_identity(creds, resolved)
+        identity = resolve_tier_identity(creds, resolved)
+        # The submitted workflows run as this operator, so they read this same per-user token file.
+        token_uri = azul_token_uri(identity, azul_token_bucket)
         client = TerraWorkspaceClient(
             resolved.url("firecloud"), google_token, resolved.terra_billing_project, workspace_name
         )
@@ -198,6 +198,7 @@ def main(
                 pipeline=pipeline,
                 entity_type=table,
                 identity=identity,
+                azul_token_uri=token_uri,
             )
             typer.secho(f"✓ {summary}", fg=typer.colors.GREEN)
             raise typer.Exit(0)
@@ -210,11 +211,12 @@ def main(
             force=force,
             run_skipped=run_skipped,
             on_stale_token=on_stale_token,
+            azul_token_uri=token_uri,
         )
         result = run_batch(client=client, creds=creds, tier=resolved, params=params)
         typer.echo(result.render())  # end-of-run summary → stdout
         raise typer.Exit(result.exit_code)
-    except (RunnerFatalError, IdentityMismatchError) as exc:
+    except RunnerFatalError as exc:
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from exc
     except (RefreshError, DefaultCredentialsError) as exc:

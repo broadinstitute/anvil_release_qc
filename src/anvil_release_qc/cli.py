@@ -1,11 +1,15 @@
 """Command-line entrypoint (Typer).
 
-anvil-release-qc ade-qc --snapshot-id <id> [--tier dev|prod] [--catalog <cat>] [--dry-run] [--verify-auth] [--config path]
-anvil-release-qc tdr-qc --snapshot-id <id> [--tier dev|prod] [--dry-run] [--verify-auth] [--config path]
+anvil-release-qc ade-qc --snapshot-id <id> [--tier dev|prod] [--catalog <cat>] [--azul-token-bucket <b>] \
+    [--dry-run] [--verify-auth]
+anvil-release-qc tdr-qc --snapshot-id <id> [--tier dev|prod] [--dry-run] [--verify-auth]
 anvil-release-qc compare --snapshot-id <id> --workspace-namespace <ns> --workspace-name <name> [...]
 anvil-release-qc compare-ingest --submitter-workspace-namespace <ns> --submitter-workspace-name <name> \
-    --snapshot-id <id> [--tier dev|prod] [--config path]
-anvil-release-qc azul-login [--tier dev|prod] [--config path] [--from-curl] [--no-open]
+    --snapshot-id <id> [--tier dev|prod]
+anvil-release-qc azul-login [--tier dev|prod] [--azul-token-bucket <b>] [--from-curl] [--no-open]
+
+Every command also takes [--billing-project <p>] [--billing-google-project-id <id>] (prod defaults:
+anvil-developer-work / terra-ec38e08d) and an optional local [--config path] (see config.py).
 """
 
 from __future__ import annotations
@@ -17,10 +21,12 @@ from typing import Optional
 
 import typer
 
-from anvil_release_qc.auth import assert_tier_identity, bearer_token, credentials_for_tier
+from anvil_release_qc.auth import bearer_token, credentials_for_tier, resolve_tier_identity
 from anvil_release_qc.azul_auth import (
+    DEFAULT_AZUL_TOKEN_BUCKET,
     AzulReindexingError,
     AzulTokenError,
+    azul_token_uri,
     expected_client_id,
     extract_bearer_token,
     validate_azul_token,
@@ -36,13 +42,53 @@ from anvil_release_qc.clients.toolkit import make_tdr
 from anvil_release_qc.compare.ingest import run_ingest_comparison
 from anvil_release_qc.compare.profile import TDR_SYSTEM_TABLES
 from anvil_release_qc.compare.qc import run_qc_comparison
-from anvil_release_qc.config import load_config, resolve_tier
+from anvil_release_qc.config import (
+    DEFAULT_BILLING,
+    DEFAULT_CONFIG_PATH,
+    DEFAULT_TIER,
+    resolve_settings,
+)
 from anvil_release_qc.pipeline import run_ade_qc, run_tdr_qc
 from anvil_release_qc.safety import SafetyError
 
 app = typer.Typer(
     help="AnVIL Data Release QC: export a TDR snapshot to a Terra workspace and verify it.",
     no_args_is_help=True,
+)
+
+
+_PROD = DEFAULT_BILLING[DEFAULT_TIER]
+
+# Shared options (Typer OptionInfo objects are plain metadata, safe to reuse across commands).
+TIER_OPT = typer.Option(
+    None,
+    "--tier",
+    "-t",
+    help=f"Tier (dev|prod). Defaults to the local config's default_tier, else {DEFAULT_TIER}.",
+)
+CONFIG_OPT = typer.Option(
+    None,
+    "--config",
+    "-c",
+    help=f"Optional local YAML config. Default: {DEFAULT_CONFIG_PATH} if it exists, else none.",
+)
+BILLING_PROJECT_OPT = typer.Option(
+    None,
+    "--billing-project",
+    help="Terra billing project (workspace namespace) for created workspaces. "
+    f"Default (prod): {_PROD['terra_billing_project']}.",
+)
+AZUL_TOKEN_BUCKET_OPT = typer.Option(
+    DEFAULT_AZUL_TOKEN_BUCKET,
+    "--azul-token-bucket",
+    help="GCS bucket holding each operator's Azul token at azul_token/<username>.txt (<username> = "
+    "your Terra email before the @).",
+)
+BILLING_GOOGLE_PROJECT_OPT = typer.Option(
+    None,
+    "--billing-google-project-id",
+    help="Google Cloud project id that BigQuery jobs run in / are billed to. "
+    f"Default (prod): {_PROD['billing_google_project_id']}.",
 )
 
 
@@ -56,15 +102,10 @@ def ade_qc(
     snapshot_id: str = typer.Option(
         ..., "--snapshot-id", "-s", help="TDR snapshot id (the input / system of record)."
     ),
-    tier: Optional[str] = typer.Option(
-        None,
-        "--tier",
-        "-t",
-        help="Tier to run against (dev|prod). Defaults to the config's default_tier.",
-    ),
-    config: Path = typer.Option(
-        Path("config/config.yaml"), "--config", "-c", help="Path to the YAML config file."
-    ),
+    tier: Optional[str] = TIER_OPT,
+    config: Optional[Path] = CONFIG_OPT,
+    billing_project: Optional[str] = BILLING_PROJECT_OPT,
+    billing_google_project_id: Optional[str] = BILLING_GOOGLE_PROJECT_OPT,
     catalog: Optional[str] = typer.Option(
         None,
         "--catalog",
@@ -86,11 +127,7 @@ def ade_qc(
         help="Keep the created QC workspace even when QC passes. Default off = the workspace is deleted "
         "after a passing QC (and always retained when QC fails).",
     ),
-    azul_token_file: Optional[str] = typer.Option(
-        None,
-        "--azul-token-file",
-        help="Path to an Azul token file, overriding the tier's azul_token_file (used by the WDL).",
-    ),
+    azul_token_bucket: str = AZUL_TOKEN_BUCKET_OPT,
     verify_auth: bool = typer.Option(
         False,
         "--verify-auth",
@@ -108,12 +145,15 @@ def ade_qc(
             catalog=catalog,
             allow_controlled_access=allow_controlled_access,
             keep_workspace=keep_workspace,
-            azul_token_file=azul_token_file,
+            azul_token_bucket=azul_token_bucket,
             verify_auth=verify_auth,
+            terra_billing_project=billing_project,
+            billing_google_project_id=billing_google_project_id,
         )
-    except (SafetyError, BigQueryAccessError, AzulReindexingError) as exc:
-        # Safety gate (consent / signed-URL hand-off), BigQuery preflight, or Azul-reindexing preflight
-        # failure -- see safety.py / bigquery.check_bigquery_access / azul_auth.assert_azul_not_reindexing.
+    except (SafetyError, BigQueryAccessError, AzulReindexingError, AzulTokenError) as exc:
+        # Safety gate (consent / signed-URL hand-off), BigQuery preflight, Azul-reindexing preflight, or
+        # an unreadable/unusable Azul token -- see safety.py / bigquery.check_bigquery_access /
+        # azul_auth.assert_azul_not_reindexing / azul_auth.read_azul_token + validate_azul_token.
         # All are "cannot run now" aborts (exit 2, retryable), not a QC verdict. Clean message, no traceback.
         typer.secho(str(exc), fg=typer.colors.RED, err=True)
         raise typer.Exit(2) from exc
@@ -128,15 +168,10 @@ def tdr_qc(
     snapshot_id: str = typer.Option(
         ..., "--snapshot-id", "-s", help="TDR snapshot id (the input / system of record)."
     ),
-    tier: Optional[str] = typer.Option(
-        None,
-        "--tier",
-        "-t",
-        help="Tier to run against (dev|prod). Defaults to the config's default_tier.",
-    ),
-    config: Path = typer.Option(
-        Path("config/config.yaml"), "--config", "-c", help="Path to the YAML config file."
-    ),
+    tier: Optional[str] = TIER_OPT,
+    config: Optional[Path] = CONFIG_OPT,
+    billing_project: Optional[str] = BILLING_PROJECT_OPT,
+    billing_google_project_id: Optional[str] = BILLING_GOOGLE_PROJECT_OPT,
     dry_run: bool = typer.Option(
         False,
         "--dry-run",
@@ -176,6 +211,8 @@ def tdr_qc(
             allow_controlled_access=allow_controlled_access,
             keep_workspace=keep_workspace,
             verify_auth=verify_auth,
+            terra_billing_project=billing_project,
+            billing_google_project_id=billing_google_project_id,
         )
     except (SafetyError, BigQueryAccessError) as exc:
         # Safety gate (consent / signed-URL hand-off) or BigQuery preflight failure -- see safety.py /
@@ -197,22 +234,23 @@ def compare(
         ..., "--workspace-namespace", help="AW namespace (Terra billing project)."
     ),
     workspace_name: str = typer.Option(..., "--workspace-name", help="AW workspace name."),
-    tier: Optional[str] = typer.Option(
-        None, "--tier", "-t", help="Tier (dev|prod). Defaults to the config's default_tier."
-    ),
-    config: Path = typer.Option(
-        Path("config/config.yaml"), "--config", "-c", help="Path to the YAML config file."
-    ),
+    tier: Optional[str] = TIER_OPT,
+    config: Optional[Path] = CONFIG_OPT,
+    billing_google_project_id: Optional[str] = BILLING_GOOGLE_PROJECT_OPT,
 ) -> None:
     """Compare an existing AW's data tables to a TDR snapshot (T1-T2 + auth-domain); no import.
 
     Useful to QC a workspace a prior run created, or to re-run QC without re-importing. Exits non-zero
     if the comparison fails.
     """
-    cfg = load_config(config)
-    resolved = resolve_tier(cfg, tier)
+    resolved = resolve_settings(
+        config,
+        tier,
+        billing_google_project_id=billing_google_project_id,
+        require=("billing_google_project_id",),  # no workspace is created
+    )
     creds = credentials_for_tier(resolved)
-    assert_tier_identity(creds, resolved)
+    resolve_tier_identity(creds, resolved)
 
     def google_token() -> str:
         return bearer_token(creds)
@@ -267,12 +305,9 @@ def compare_ingest(
         "-s",
         help="TDR snapshot id (the system of record to compare against).",
     ),
-    tier: Optional[str] = typer.Option(
-        None, "--tier", "-t", help="Tier (dev|prod). Defaults to the config's default_tier."
-    ),
-    config: Path = typer.Option(
-        Path("config/config.yaml"), "--config", "-c", help="Path to the YAML config file."
-    ),
+    tier: Optional[str] = TIER_OPT,
+    config: Optional[Path] = CONFIG_OPT,
+    billing_google_project_id: Optional[str] = BILLING_GOOGLE_PROJECT_OPT,
 ) -> None:
     """Compare a submitter (ADSW) workspace's tables to the TDR snapshot (ingestion QC).
 
@@ -281,10 +316,14 @@ def compare_ingest(
     workspace_attributes tables are out of scope. No PFB export (no Azul / signed URL / consent gate).
     Exits non-zero if any submitter table is missing from TDR or has a row-count mismatch.
     """
-    cfg = load_config(config)
-    resolved = resolve_tier(cfg, tier)
+    resolved = resolve_settings(
+        config,
+        tier,
+        billing_google_project_id=billing_google_project_id,
+        require=("billing_google_project_id",),  # no workspace is created
+    )
     creds = credentials_for_tier(resolved)
-    assert_tier_identity(creds, resolved)
+    resolve_tier_identity(creds, resolved)
 
     def google_token() -> str:
         return bearer_token(creds)
@@ -316,12 +355,9 @@ def compare_ingest(
 
 @app.command("azul-login")
 def azul_login(
-    tier: Optional[str] = typer.Option(
-        None, "--tier", "-t", help="Tier (dev|prod). Defaults to the config's default_tier."
-    ),
-    config: Path = typer.Option(
-        Path("config/config.yaml"), "--config", "-c", help="Path to the YAML config file."
-    ),
+    tier: Optional[str] = TIER_OPT,
+    config: Optional[Path] = CONFIG_OPT,
+    azul_token_bucket: str = AZUL_TOKEN_BUCKET_OPT,
     from_curl: bool = typer.Option(
         False,
         "--from-curl",
@@ -333,19 +369,22 @@ def azul_login(
         help="Open the Azul Swagger UI in a browser (like gcloud auth login).",
     ),
 ) -> None:
-    """Capture an Azul access token via interactive browser login and store it for the tier.
+    """Capture an Azul access token via interactive browser login and upload it for your runs.
 
     Azul needs a Google access token issued to *its own* OAuth client (a plain gcloud ADC token is
     rejected). This opens the Azul Swagger UI, you sign in and copy the token, and it is validated
-    (azp, account, expiry) and written to the tier's token file. See docs/export_import_flow.md.
+    (azp, expiry) and uploaded to gs://<bucket>/azul_token/<username>.txt -- where every ade-qc run
+    you start (locally or as a Terra workflow) reads it. See docs/export_import_flow.md.
     """
-    cfg = load_config(config)
-    resolved = resolve_tier(cfg, tier)
+    resolved = resolve_settings(config, tier, require=())  # billing is unused here
+    creds = credentials_for_tier(resolved)
+    user = resolve_tier_identity(creds, resolved)
+    token_uri = azul_token_uri(user, azul_token_bucket)
     swagger_url = resolved.url("azul").rstrip("/") + "/"
     client_id = expected_client_id(resolved)
 
-    typer.echo(f"Azul login for tier '{resolved.name}' as {resolved.email}:")
-    typer.echo(f"  1. In the Azul Swagger UI, click Authorize and sign in as {resolved.email}.")
+    typer.echo(f"Azul login for tier '{resolved.name}' as {user} (token → {token_uri}):")
+    typer.echo(f"  1. In the Azul Swagger UI, click Authorize and sign in as {user}.")
     typer.echo("  2. Expand any GET operation, click 'Try it out', then 'Execute'.")
     typer.echo("  3. In the 'Curl' box, copy the value after 'Authorization: Bearer'.")
     if open_browser:
@@ -361,17 +400,23 @@ def azul_login(
 
     try:
         token = extract_bearer_token(raw)
-        info = validate_azul_token(
-            token, expected_azp=client_id, allowed_emails=resolved.authorized_emails
-        )
-        path = write_azul_token(resolved, token, info)
+        info = validate_azul_token(token, expected_azp=client_id)
+        token_owner = info.get("email") or ""
+        if token_owner.lower() != user.lower():
+            typer.secho(
+                f"Warning: this token belongs to {token_owner!r}, not {user!r}; it will still be stored "
+                f"at {token_uri} and used for {user}'s runs.",
+                fg=typer.colors.YELLOW,
+                err=True,
+            )
+        write_azul_token(creds, token_uri, resolved, token, info)
     except AzulTokenError as exc:
         typer.secho(f"Token rejected: {exc}", fg=typer.colors.RED, err=True)
         raise typer.Exit(1) from exc
 
     minutes = int(info.get("expires_in", 0)) // 60
     typer.secho(
-        f"Stored token for {info.get('email')} at {path} (expires in ~{minutes} min).",
+        f"Stored token for {info.get('email')} at {token_uri} (expires in ~{minutes} min).",
         fg=typer.colors.GREEN,
     )
 

@@ -1,0 +1,7 @@
+{
+  "AnvilDataExplorerQc.detailed_log": "${this.ade_detailed_log}",
+  "AnvilDataExplorerQc.qc_passed": "${this.ade_qc_passed}",
+  "AnvilDataExplorerQc.qc_report": "${this.ade_qc_report}",
+  "AnvilDataExplorerQc.workspace_name": "${this.ade_workspace_name}",
+  "AnvilDataExplorerQc.workspace_namespace": "${this.ade_workspace_namespace}"
+}

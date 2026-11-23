@@ -120,7 +120,8 @@ and **disallowed using it to reach controlled-access data in TDR**, to protect t
 login; `azp` = Azul's client, ~1 h, **non-refreshable**). It is used only in the **short** Azul phase
 (minutes); the long import phase uses the **refreshable** gcloud ADC token, so mid-run expiry is only
 a small Azul-phase risk. Ergonomics (**implemented 2026-06-11**): the `azul-login` CLI helper captures
-+ `tokeninfo`-validates the token (`azp`, account email, `exp`) and writes the token file, and a
++ `tokeninfo`-validates the token (`azp`, account email, `exp`) and uploads it to the operator's
+`gs://<azul_token_bucket>/azul_token/<username>.txt` (since v0.3.6; was a local/Workspace-Data file), and a
 pre-run gate fails fast if the Azul token is wrong-client/wrong-account/near-expiry. (Not yet run
 end-to-end for a controlled-access dataset.) One human login (~hourly) covers a large batch, since one
 token can launch many concurrent pipelines.
@@ -150,11 +151,11 @@ HTTPS host.
 
 **Controlled-access ENABLED (2026-06 — Broad security team reviewed & approved the end-to-end flow, no
 restrictions, all AnVIL data):** the consent gate (layer 1) is now an **explicit, default-off opt-in**,
-`allow_controlled_access` (the `--allow-controlled-access` CLI flag / `ade_qc.wdl` input; see
+`allow_controlled_access` (the `--allow-controlled-access` CLI flag / `anvil_data_explorer_qc.wdl` input; see
 `safety.assert_consent_permitted`). Default stays fail-closed (open-access only); a controlled-access
 run must deliberately set the flag, which permits **any** consentCode and emits an audit `WARNING`.
-Layers 2-4 apply on every run regardless. For controlled data, `ade_qc.wdl` also takes an `azul_token`
-(Azul requires a token for controlled access).
+Layers 2-4 apply on every run regardless. For controlled data, `ade-qc` also needs the running user's Azul
+token at `gs://<azul_token_bucket>/azul_token/<username>.txt` (Azul requires a token for controlled access).
 **`tdr-qc` (TDR direct export) — controlled-access ENABLED (2026-06-27):** the `tdr-qc` flow
 ([`tdr_export_flow.md`](tdr_export_flow.md)) reuses the same import + 4 safety layers, with the layer-3
 provenance pinned per-snapshot to `storage.googleapis.com/<bq_project>-snapshot-export-bucket/`. The
