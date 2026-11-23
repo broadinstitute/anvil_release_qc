@@ -31,11 +31,11 @@ polls each submission to a terminal state, then reads the resulting row to decid
 
 ## Inputs
 
-**From config (per tier — reuses [`config.py`](../src/anvil_release_qc/config.py)):** `tier`, credentials
-(ADC + the identity guard), the workspace namespace (= `terra_billing_project`), and a new per-tier
-**`qc_workspace_name`** — the existing shared QC workspace the runner submits into (also overridable on
-the CLI). Everything else (service URLs, authorized users, Azul OAuth client id) comes from the same
-config the QC commands use.
+**Settings (reuses [`config.py`](../src/anvil_release_qc/config.py)):** `tier` (default prod), credentials
+(ADC; the Terra user is resolved via Sam and logged), the shared workspace's namespace (=
+`--billing-project`, default `anvil-developer-work` in prod), and **`--qc-workspace-name`** — the existing
+shared QC workspace the runner submits into. The optional local `config/config.yaml` can supply any of
+these (e.g. `qc_workspace_name`, a per-tier `adc_credentials_file`) so you don't retype them.
 
 **From the CLI:**
 
@@ -44,15 +44,16 @@ config the QC commands use.
 | `-p, --pipeline` | `ade_qc` or `tdr_qc` (v1). |
 | `--table` | Root entity type = the data-table name the method config is bound to (e.g. `anvil15_qc`). |
 | `-s, --snapshots` | A **TSV with a `snapshot_id` column** — the rows to process (order-preserving, de-duplicated). Other columns are ignored, so you can export a data-table selection directly. **Required unless `--verify-auth`.** |
-| `-t, --tier` | `dev` \| `prod` (defaults to the config's `default_tier`). |
-| `--qc-workspace-name` | Override the config's `qc_workspace_name`. |
+| `-t, --tier` | `dev` \| `prod` (defaults to the local config's `default_tier`, else `prod`). |
+| `--qc-workspace-name` | The shared QC workspace to submit into (e.g. `anvil-data-qc-shared`); overrides the local config's `qc_workspace_name`. |
+| `--billing-project` | Namespace of the shared QC workspace (default `anvil-developer-work` in prod). |
 | `--max-concurrent` | Max workflows in flight (default **5**, hard ceiling **10**). |
 | `--dry-run` | Validate + print the effective plan; create **no** submissions. |
 | `--verify-auth` | Auth/access preflight only: check identity, workspace + method-config access, and (ade_qc) the Azul token, then exit — **no** submissions, `--snapshots` not required. |
 | `--force` / `--rerun-passed` | Re-run rows that already passed (default: skip them). |
 | `--run-skipped` | Also run rows marked to skip via the `qc_skip` column (default: exclude them). |
 | `--on-stale-token` | ade_qc Azul-token handling when TTL is low: `auto` (TTY→prompt, else wait) \| `prompt` \| `wait`. |
-| `-c, --config` | Path to the YAML config (default `config/config.yaml`). |
+| `-c, --config` | Optional local YAML config (default: `config/config.yaml` if it exists, else none). |
 
 ## What it does
 
@@ -60,8 +61,8 @@ config the QC commands use.
 
 Cheap, reuse-only checks; if any fails the batch stops **before** a single workflow is submitted:
 
-- **Identity guard** on the operator's ADC (`auth.assert_tier_identity`) — the same authorized-user check
-  the pipelines apply, resolved through Sam.
+- **Terra-user resolution** on the operator's ADC (`auth.resolve_tier_identity`) — resolved through Sam
+  and logged (no allowlist; Terra permissions decide access), the same as the pipelines.
 - **Method-config resolution** — the pipeline's config (`anvil-data-qc-ade-qc` / `anvil-data-qc-tdr-qc`)
   exists in the workspace and its **`rootEntityType` matches `--table`** (else the submissions would bind
   to the wrong table).
@@ -76,7 +77,7 @@ Cheap, reuse-only checks; if any fails the batch stops **before** a single workf
 
 **Standalone auth preflight — `--verify-auth`.** For a fast, side-effect-free check *before* preparing a
 run, `qc-batch-runner --pipeline … --table … --verify-auth` (no `--snapshots` needed) runs just the
-auth/access checks — identity guard → workspace + method-config access → (ade_qc) Azul-token validity —
+auth/access checks — Terra-user resolution → workspace + method-config access → (ade_qc) Azul-token validity —
 prints a `✓ AUTH VERIFIED — operating as <you>; workspace … reachable; …; Azul token …` line, and exits
 **0** before any submission. It mirrors the pipelines' `--verify-auth` and is the quickest way to confirm
 "am I signed in as the right account, and is my Azul token usable?" before committing to a long batch —
@@ -112,16 +113,17 @@ the throttle**, to keep the shared production workspace responsive for researche
 ### 3. Azul-token pacing (`ade_qc` only)
 
 `tdr_qc` needs no Azul token and skips this entirely. For `ade_qc`, before launching a wave the runner
-requires the Workspace-Data Azul token to have TTL ≥ **35 min** = `MIN_TOKEN_SECONDS_FOR_RUN` (1800,
+requires the operator's Azul token to have TTL ≥ **35 min** = `MIN_TOKEN_SECONDS_FOR_RUN` (1800,
 the pipeline's own minimum) + a **300 s launch→manifest lag buffer**, so the launched workflow still has
-≥ its own minimum when it reaches the Azul step. The token's `gs://` path comes from the workspace
-attribute `anvil_data_qc_azul_token`; it is **re-read each check** (no caching), so a mid-run refresh is
-picked up, and is validated by `azul_auth.validate_azul_token` (azp + authorized account + remaining
-TTL).
+≥ its own minimum when it reaches the Azul step. The token is read from
+`gs://<azul_token_bucket>/azul_token/<username>.txt` for the operator running the batch (`--azul-token-bucket`,
+same default as the WDL) — the same file the submitted workflows read, since they run as the operator. It
+is **re-read each check** (no caching), so a mid-run `azul-login` is picked up, and is validated by
+`azul_auth.validate_azul_token` (azp + remaining TTL).
 
 If the token is insufficient the runner **pauses new launches but keeps monitoring in-flight**, then:
-- **interactive** (TTY, or `--on-stale-token prompt`) → prompt the operator to refresh + re-upload, and
-  re-check on Enter;
+- **interactive** (TTY, or `--on-stale-token prompt`) → prompt the operator to re-run `azul-login` (which
+  re-uploads), and re-check on Enter;
 - **non-interactive** (`--on-stale-token wait`) → poll every 60 s up to 2 h, then give up
   (`RunnerFatalError`).
 

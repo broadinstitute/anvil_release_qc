@@ -7,6 +7,7 @@ from anvil_release_qc.azul_auth import (
     AzulReindexingError,
     AzulTokenError,
     assert_azul_not_reindexing,
+    azul_token_uri,
     azul_indexing_backlog,
     discover_azul_client_id,
     expected_client_id,
@@ -22,14 +23,12 @@ _CLIENT_ID = "111-abcDEF.apps.googleusercontent.com"
 _EMAIL = "dev-user@test.firecloud.org"
 
 
-def _tier(token_file=None, client_id=None):
+def _tier(client_id=None):
     return ResolvedTier(
         name="dev",
-        email=_EMAIL,
         adc_credentials_file=None,
         terra_billing_project="b",
         billing_google_project_id="terra-x",
-        azul_token_file=token_file,
         azul_oauth2_client_id=client_id,
         service_urls={"azul": "https://azul.example/"},
     )
@@ -168,17 +167,16 @@ def test_reindexing_blocks_when_not_up(monkeypatch):
 
 def test_validate_ok(monkeypatch):
     monkeypatch.setattr(azul_auth, "tokeninfo", lambda t: _info())
-    info = validate_azul_token("tok", expected_azp=_CLIENT_ID, allowed_emails=[_EMAIL])
+    info = validate_azul_token("tok", expected_azp=_CLIENT_ID)
     assert info["azp"] == _CLIENT_ID
 
 
-def test_validate_allows_any_of_multiple(monkeypatch):
-    # Multi-operator: a token from any account in allowed_emails passes.
-    monkeypatch.setattr(azul_auth, "tokeninfo", lambda t: _info(email="second@x.org"))
-    info = validate_azul_token(
-        "tok", expected_azp=_CLIENT_ID, allowed_emails=["first@x.org", "second@x.org"]
-    )
-    assert info["email"] == "second@x.org"
+def test_validate_accepts_any_account(monkeypatch):
+    # No account allowlist: any Terra user's token works (Azul enforces data access); the owner's
+    # email is returned for the audit log.
+    monkeypatch.setattr(azul_auth, "tokeninfo", lambda t: _info(email="anyone@x.org"))
+    info = validate_azul_token("tok", expected_azp=_CLIENT_ID)
+    assert info["email"] == "anyone@x.org"
 
 
 def test_validate_azp_mismatch(monkeypatch):
@@ -189,52 +187,46 @@ def test_validate_azp_mismatch(monkeypatch):
         validate_azul_token("tok", expected_azp=_CLIENT_ID)
 
 
-def test_validate_email_not_authorized(monkeypatch):
-    monkeypatch.setattr(azul_auth, "tokeninfo", lambda t: _info(email="someone@else.org"))
-    with pytest.raises(AzulTokenError):
-        validate_azul_token("tok", expected_azp=_CLIENT_ID, allowed_emails=[_EMAIL])
-
-
-def test_validate_rejects_when_not_in_multiple(monkeypatch):
-    # Multi-operator: a token from an account in NONE of allowed_emails is rejected, and the check
-    # is case-insensitive on the allow-set side too (mixed-case entries still match exactly).
-    monkeypatch.setattr(azul_auth, "tokeninfo", lambda t: _info(email="outsider@x.org"))
-    with pytest.raises(AzulTokenError):
-        validate_azul_token(
-            "tok", expected_azp=_CLIENT_ID, allowed_emails=["First@x.org", "Second@x.org"]
-        )
-
-
-def test_validate_empty_allowed_emails_fails_closed(monkeypatch):
-    # A provided-but-empty allow-set rejects every account (fail-closed, matching the identity guard);
-    # only allowed_emails=None skips the email check.
-    monkeypatch.setattr(azul_auth, "tokeninfo", lambda t: _info(email=_EMAIL))
-    with pytest.raises(AzulTokenError):
-        validate_azul_token("tok", expected_azp=_CLIENT_ID, allowed_emails=[])
-
-
 def test_validate_expired(monkeypatch):
     monkeypatch.setattr(azul_auth, "tokeninfo", lambda t: _info(expires_in="60"))
     with pytest.raises(AzulTokenError, match="expires"):
         validate_azul_token("tok", expected_azp=_CLIENT_ID, min_remaining_seconds=300)
 
 
-# --- read / write token file ---
+# --- token location / read / write (GCS mocked) ---
+
+_URI = "gs://bkt/azul_token/dev-user.txt"
 
 
-def test_read_token_unset_returns_none():
-    assert read_azul_token(_tier(token_file=None)) is None
+def test_azul_token_uri_uses_email_local_part_and_default_bucket():
+    assert azul_token_uri("samn@broadinstitute.org") == (
+        "gs://fc-secure-886bea29-8c4e-4568-920a-a8cfee18e659/azul_token/samn.txt"
+    )
+    assert azul_token_uri(_EMAIL, "bkt") == _URI
 
 
-def test_read_token_missing_raises(tmp_path):
-    with pytest.raises(FileNotFoundError):
-        read_azul_token(_tier(token_file=str(tmp_path / "nope.txt")))
+def test_azul_token_uri_rejects_empty_username():
+    with pytest.raises(AzulTokenError):
+        azul_token_uri("@x.org")
 
 
-def test_read_token_empty_or_comments_returns_none(tmp_path):
-    f = tmp_path / "tok.txt"
-    f.write_text("# only comments\n\n")
-    assert read_azul_token(_tier(token_file=str(f))) is None
+def test_read_token_missing_object_returns_none(monkeypatch):
+    monkeypatch.setattr(azul_auth, "read_gcs_text_if_exists", lambda creds, uri: None)
+    assert read_azul_token(object(), _URI) is None
+
+
+def test_read_token_only_comments_returns_none(monkeypatch):
+    monkeypatch.setattr(azul_auth, "read_gcs_text_if_exists", lambda c, u: "# only comments\n\n")
+    assert read_azul_token(object(), _URI) is None
+
+
+def test_read_token_unreadable_raises_token_error(monkeypatch):
+    def forbidden(creds, uri):
+        raise azul_auth.requests.HTTPError("403 Forbidden")
+
+    monkeypatch.setattr(azul_auth, "read_gcs_text_if_exists", forbidden)
+    with pytest.raises(AzulTokenError, match="read access"):
+        read_azul_token(object(), _URI)
 
 
 def test_token_from_file_text_skips_comment_header():
@@ -249,19 +241,22 @@ def test_token_from_file_text_skips_comment_header():
     assert token_from_file_text("") is None
 
 
-def test_write_then_read_roundtrip(tmp_path):
-    f = tmp_path / "secrets" / "azul-token-dev.txt"
-    tier = _tier(token_file=str(f))
-    path = write_azul_token(tier, "the-access-token-value", _info())
-    assert path == f
-    assert (path.stat().st_mode & 0o777) == 0o600
-    assert path.read_text().startswith("#")  # human-readable header
-    assert read_azul_token(tier) == "the-access-token-value"
+def test_write_then_read_roundtrip(monkeypatch):
+    store: dict = {}
+    monkeypatch.setattr(azul_auth, "write_gcs_text", lambda c, uri, text: store.update({uri: text}))
+    monkeypatch.setattr(azul_auth, "read_gcs_text_if_exists", lambda c, uri: store.get(uri))
+    assert write_azul_token(object(), _URI, _tier(), "the-access-token-value", _info()) == _URI
+    assert store[_URI].startswith("#")  # human-readable header
+    assert read_azul_token(object(), _URI) == "the-access-token-value"
 
 
-def test_write_token_no_file_configured_raises():
-    with pytest.raises(AzulTokenError):
-        write_azul_token(_tier(token_file=None), "tok", _info())
+def test_write_token_upload_failure_raises_token_error(monkeypatch):
+    def forbidden(creds, uri, text):
+        raise azul_auth.requests.HTTPError("403 Forbidden")
+
+    monkeypatch.setattr(azul_auth, "write_gcs_text", forbidden)
+    with pytest.raises(AzulTokenError, match="write access"):
+        write_azul_token(object(), _URI, _tier(), "tok", _info())
 
 
 # --- expected_client_id ---

@@ -79,7 +79,7 @@ class TerraWorkspaceClient(BaseClient):
         return self.request("GET", self._ws(f"/entities/{entity_type}/{entity_name}")).json()
 
     def get_workspace_attributes(self) -> dict:
-        """Return the workspace's attributes (Workspace Data key/values), e.g. the Azul-token gs:// path."""
+        """Return the workspace's attributes (Workspace Data key/values)."""
         resp = self.request("GET", self._ws(""), params={"fields": "workspace.attributes"}).json()
         return (resp.get("workspace") or resp).get("attributes") or {}
 

@@ -1,9 +1,8 @@
 {
-  "TdrQc.config": "gs://your-bucket/anvil-release-qc/config.yaml",
   "TdrQc.snapshot_id": "e8dacaea-d37d-48e5-b0a9-c88777753423",
   "TdrQc.tier": "prod",
   "TdrQc.dry_run": false,
   "TdrQc.keep_workspace": false,
   "TdrQc.allow_controlled_access": false,
-  "TdrQc.docker": "us-central1-docker.pkg.dev/dsp-sa-development/anvil-qc/anvil-release-qc:0.3.5"
+  "TdrQc.docker": "us-central1-docker.pkg.dev/operations-portal-427515/anvil-qc/anvil-release-qc:0.3.6"
 }

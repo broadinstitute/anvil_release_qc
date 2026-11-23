@@ -31,10 +31,9 @@ from anvil_release_qc.azul_auth import (
     AzulTokenError,
     assert_azul_not_reindexing,
     expected_client_id,
-    token_from_file_text,
+    read_azul_token,
     validate_azul_token,
 )
-from anvil_release_qc.batch.gcs import read_gcs_text
 from anvil_release_qc.batch.terra import (
     WORKFLOW_ABORTED,
     WORKFLOW_FAILED,
@@ -58,8 +57,6 @@ PIPELINE_COLUMN_PREFIX = {"ade_qc": "ade", "tdr_qc": "tdr"}
 # Pipelines that need a valid Azul token (controlled-access data). tdr_qc never does.
 PIPELINES_NEEDING_AZUL_TOKEN = frozenset({"ade_qc"})
 
-# Workspace Data key holding the gs:// path to the Azul token file.
-AZUL_TOKEN_ATTRIBUTE = "anvil_data_qc_azul_token"
 
 # Data-table column that marks a row to EXCLUDE from batch runs (e.g. datasets known to exceed the Terra
 # import ceiling). Empty/absent = run normally; any non-empty value = skip, and the value IS the
@@ -169,6 +166,9 @@ class BatchParams:
     force: bool = False  # re-run rows that already passed
     run_skipped: bool = False  # also run rows marked to skip via the qc_skip column
     on_stale_token: str = "auto"  # "auto" (TTY) | "prompt" | "wait"
+    # gs://<bucket>/azul_token/<username>.txt for the operator (ade_qc); the submitted workflows run as
+    # the operator, so they read this same file (see azul_auth.azul_token_uri).
+    azul_token_uri: Optional[str] = None
     token_min_seconds: int = DEFAULT_TOKEN_MIN_SECONDS
     token_poll_seconds: float = DEFAULT_TOKEN_POLL_SECONDS
     token_max_wait_seconds: float = DEFAULT_TOKEN_MAX_WAIT_SECONDS
@@ -229,27 +229,25 @@ def _skip_reason(attrs: dict) -> str:
 
 
 def check_azul_token(
-    client: TerraWorkspaceClient, creds: Credentials, tier: ResolvedTier, min_seconds: int
+    creds: Credentials, tier: ResolvedTier, token_uri: Optional[str], min_seconds: int
 ):
-    """Return ``(ok, detail)`` for the Workspace-Data Azul token. Never logs the token itself.
+    """Return ``(ok, detail)`` for the operator's Azul token at ``token_uri``. Never logs the token.
 
-    ``ok`` True means the token exists and passes ``validate_azul_token`` (azp + account + >= min_seconds).
+    ``ok`` True means the token exists and passes ``validate_azul_token`` (azp + >= min_seconds).
     ``detail`` is a human string (validated metadata on success, or the redaction-safe failure reason).
     """
-    attrs = client.get_workspace_attributes()
-    gs_uri = attrs.get(AZUL_TOKEN_ATTRIBUTE)
-    if not gs_uri:
-        return False, f"Workspace Data key {AZUL_TOKEN_ATTRIBUTE!r} is not set."
-    # The token file carries a #-comment header above the token line (same format azul-login writes);
-    # extract the token line exactly as the local reader does, so the two parse it identically.
-    token = token_from_file_text(read_gcs_text(creds, gs_uri))  # SECRET -- never log `token`
+    if not token_uri:
+        return False, "No Azul token location set."
+    try:
+        token = read_azul_token(creds, token_uri)  # SECRET -- never log `token`
+    except AzulTokenError as exc:
+        return False, str(exc)
     if not token:
-        return False, f"Token file {gs_uri} has no token line (empty or only comments)."
+        return False, f"No Azul token at {token_uri} (run `anvil-release-qc azul-login`)."
     try:
         info = validate_azul_token(
             token,
             expected_azp=expected_client_id(tier),
-            allowed_emails=tier.authorized_emails,
             min_remaining_seconds=min_seconds,
         )
     except AzulTokenError as exc:
@@ -273,7 +271,7 @@ def ensure_token_available(
     """
     waited = 0.0
     while True:
-        ok, detail = check_azul_token(client, creds, tier, params.token_min_seconds)
+        ok, detail = check_azul_token(creds, tier, params.azul_token_uri, params.token_min_seconds)
         if ok:
             logger.info("Azul token OK: %s", detail)
             return
@@ -281,7 +279,7 @@ def ensure_token_available(
         if interactive:
             logger.warning("Azul token not usable (need >= %ds TTL): %s", need_min, detail)
             input(
-                f"  → Refresh the Azul token (azul-login + upload to Workspace Data '{AZUL_TOKEN_ATTRIBUTE}'), "
+                f"  → Refresh the Azul token (`anvil-release-qc azul-login` → {params.azul_token_uri}), "
                 "then press Enter to re-check... "
             )
             continue
@@ -398,18 +396,19 @@ def run_verify_auth(
     entity_type: str,
     identity: str,
     token_min_seconds: int = DEFAULT_TOKEN_MIN_SECONDS,
+    azul_token_uri: Optional[str] = None,
 ) -> str:
     """Side-effect-free auth/access preflight (no submissions). Mirrors the pipelines' ``--verify-auth``.
 
-    Assumes the caller has already run the identity guard (``assert_tier_identity``) and passes the
+    Assumes the caller has already resolved the identity (``resolve_tier_identity``) and passes the
     resolved Terra user as ``identity``. Then confirms, without side effects: the shared workspace + the
     pipeline's method config are reachable and the config's ``rootEntityType`` matches ``entity_type``;
     and -- for ``ade_qc`` -- that a usable Azul token is present (``check_azul_token``). Returns a one-line
-    human summary; raises ``RunnerFatalError`` (or ``IdentityMismatchError`` upstream) on any problem.
+    human summary; raises ``RunnerFatalError`` on any problem.
     """
     method_ns, method_name = resolve_method_config(client, pipeline, entity_type)
     if pipeline in PIPELINES_NEEDING_AZUL_TOKEN:
-        ok, detail = check_azul_token(client, creds, tier, token_min_seconds)
+        ok, detail = check_azul_token(creds, tier, azul_token_uri, token_min_seconds)
         if not ok:
             raise RunnerFatalError(f"Azul token not usable for {pipeline}: {detail}")
         token_line = f"Azul token OK ({detail})"
@@ -469,7 +468,9 @@ def run_batch(
 
     if params.dry_run:
         if needs_token:
-            ok, detail = check_azul_token(client, creds, tier, params.token_min_seconds)
+            ok, detail = check_azul_token(
+                creds, tier, params.azul_token_uri, params.token_min_seconds
+            )
             logger.info("Azul token check (dry-run): %s — %s", "OK" if ok else "NOT USABLE", detail)
         for sid in run_list:
             result.outcomes[sid] = Outcome.WOULD_RUN

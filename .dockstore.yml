@@ -2,7 +2,7 @@ version: 1.2
 workflows:
   - name: AnVILDataExplorerQC
     subclass: WDL
-    primaryDescriptorPath: /wdl/ade_qc.wdl
+    primaryDescriptorPath: /wdl/anvil_data_explorer_qc.wdl
 
   - name: TdrQC
     subclass: WDL

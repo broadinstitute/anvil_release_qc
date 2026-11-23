@@ -1,11 +1,13 @@
-"""Authentication via Google Application Default Credentials (ADC), with a tier identity guard.
+"""Authentication via Google Application Default Credentials (ADC), plus identity resolution for the log.
 
-One human Terra user account per tier. Locally the credentials come from a per-tier saved ADC file; in
-deployment, from the ambient runtime identity (a Terra **pet service account**). The same credentials
-yield both REST bearer tokens (Azul, Terra) and the BigQuery client. Before any tier work, the identity
-guard resolves the **canonical Terra user** behind the active credentials via Sam
-(``/api/users/v2/self``, which maps a pet service account to its owning human user) and asserts it
-equals the configured email for the selected tier.
+Locally the credentials come from a per-tier saved ADC file (optional local config) or the ambient ADC;
+in deployment, from the ambient runtime identity (a Terra **pet service account**). The same credentials
+yield both REST bearer tokens (Azul, Terra) and the BigQuery client. Before any tier work,
+``resolve_tier_identity`` resolves the **canonical Terra user** behind the active credentials via Sam
+(``/api/users/v2/self``, which maps a pet service account to its owning human user) and logs it for the
+audit trail. There is no allowlist: who may act on what is enforced by Terra/TDR/Azul permissions.
+Resolving via Sam still fails fast when the credentials are not a registered Terra user of the tier
+(e.g. dev credentials pointed at prod).
 """
 
 from __future__ import annotations
@@ -32,13 +34,9 @@ SCOPES = (
 USERINFO_URL = "https://openidconnect.googleapis.com/v1/userinfo"
 
 #: Sam endpoint that maps an access token (a human login OR a Terra pet service account) to the
-#: registered Terra user, returning their human email -- so the identity guard treats a pet SA as its
-#: owning user (Sam Swagger: GET /api/users/v2/self).
+#: registered Terra user, returning their human email -- so a pet SA is logged as its owning user
+#: (Sam Swagger: GET /api/users/v2/self).
 SAM_SELF_PATH = "/api/users/v2/self"
-
-
-class IdentityMismatchError(RuntimeError):
-    """Raised when the active credential's identity does not match the configured tier email."""
 
 
 def credentials_for_tier(tier: ResolvedTier) -> Credentials:
@@ -74,7 +72,7 @@ def terra_user_email(creds: Credentials, sam_url: str) -> str:
 
     Works for both a human ADC login and a Terra pet service account: Sam's ``/api/users/v2/self``
     maps the access token to the registered Terra user and returns their (human) email. This lets the
-    identity guard treat a pet service account as its owning human user.
+    audit log record a pet service account as its owning human user.
     """
     token = bearer_token(creds)
     url = f"{sam_url.rstrip('/')}{SAM_SELF_PATH}"
@@ -96,30 +94,22 @@ def terra_user_email(creds: Credentials, sam_url: str) -> str:
     return email
 
 
-def assert_tier_identity(creds: Credentials, tier: ResolvedTier) -> str:
-    """Identity guard: abort unless the active credentials' Terra user is authorized for the tier.
+def resolve_tier_identity(creds: Credentials, tier: ResolvedTier) -> str:
+    """Resolve and log the Terra user the active credentials operate as; return its email.
 
-    Resolves the canonical Terra user via Sam (mapping a pet service account to its owning human user)
-    and asserts it is in ``tier.authorized_emails`` (= ``email`` ∪ ``authorized_users``, so multiple
-    operators are supported). The raw ADC identity (e.g. the pet SA in a Terra workflow) is logged for
-    the audit trail. Returns the resolved Terra-user email.
+    Resolves the canonical Terra user via Sam (mapping a pet service account to its owning human user);
+    the raw ADC identity (e.g. the pet SA in a Terra workflow) is logged alongside for the audit trail.
+    Raises ``RuntimeError`` if Sam cannot resolve the credentials to a Terra user on this tier.
     """
-    # Raw ADC account (e.g. the pet SA) -- audit-only now that Sam is the authority, so best-effort:
-    # never let this lookup block an otherwise-valid run.
+    # Raw ADC account (e.g. the pet SA) -- audit-only, so best-effort: never let this lookup block a run.
     try:
         adc_identity = active_identity_email(creds)
     except (requests.RequestException, RuntimeError) as exc:
         logger.debug("Could not resolve the raw ADC identity for the audit log: %s", exc)
         adc_identity = "unknown"
     terra_user = terra_user_email(creds, tier.url("sam"))
-    if terra_user.lower() not in tier.authorized_emails:
-        raise IdentityMismatchError(
-            f"Active Terra user '{terra_user}' (ADC identity '{adc_identity}') is not authorized for "
-            f"tier '{tier.name}' (authorized: {sorted(tier.authorized_emails)}). Refusing to proceed "
-            "(wrong-tier / unauthorized-user guard)."
-        )
     logger.info(
-        "Identity guard OK: Terra user %s (ADC identity %s; tier '%s').",
+        "Running as Terra user %s (ADC identity %s; tier '%s').",
         terra_user,
         adc_identity,
         tier.name,

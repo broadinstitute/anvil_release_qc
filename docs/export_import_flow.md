@@ -77,8 +77,9 @@ Two **distinct** credentials are needed — a single token does *not* satisfy ev
 
 **`azul-login` helper + pre-run gate.** `anvil-release-qc azul-login --tier <t>` opens the Azul Swagger
 UI, you sign in and copy the token, and it is validated via Google `tokeninfo` (**the same check Azul
-runs** — `azp`, account email, expiry) and written to the tier's `azul_token_file`. Before each run
-the pipeline re-validates that token and **fails fast** if it is wrong-client / wrong-account / near
+runs** — `azp`, account email, expiry) and uploaded to `gs://<azul_token_bucket>/azul_token/<username>.txt`
+(`<username>` = your Terra email before the `@`). Before each run the pipeline reads the running user's
+file, re-validates the token, and **fails fast** (exit 2) if it is unreadable, wrong-client, or near
 expiry (telling you to re-run `azul-login`). The expected `azp` comes from `azul_oauth2_client_id` or
 is auto-discovered from Azul's served `swagger-initializer.js` (so prod's id need not be hardcoded).
 One login (~hourly) covers a large batch, since one token can launch many concurrent pipelines.

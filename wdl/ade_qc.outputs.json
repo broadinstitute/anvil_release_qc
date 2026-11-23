@@ -1,7 +1,0 @@
-{
-  "AdeQc.detailed_log": "${this.ade_detailed_log}",
-  "AdeQc.qc_passed": "${this.ade_qc_passed}",
-  "AdeQc.qc_report": "${this.ade_qc_report}",
-  "AdeQc.workspace_name": "${this.ade_workspace_name}",
-  "AdeQc.workspace_namespace": "${this.ade_workspace_namespace}"
-}

@@ -31,12 +31,13 @@ from google.auth.credentials import Credentials
 from ops_utils.terra_util import TerraWorkspace
 
 from anvil_release_qc import __version__
-from anvil_release_qc.auth import assert_tier_identity, bearer_token, credentials_for_tier
+from anvil_release_qc.auth import bearer_token, credentials_for_tier, resolve_tier_identity
 from anvil_release_qc.azul_auth import (
     MIN_TOKEN_SECONDS_FOR_RUN,
     AzulReindexingError,
     assert_azul_not_reindexing,
     expected_client_id,
+    azul_token_uri,
     read_azul_token,
     validate_azul_token,
 )
@@ -59,7 +60,7 @@ from anvil_release_qc.clients.tdr import (
 from anvil_release_qc.clients.toolkit import make_tdr, make_terra_workspace
 from anvil_release_qc.compare.profile import TDR_SYSTEM_TABLES
 from anvil_release_qc.compare.qc import run_qc_comparison
-from anvil_release_qc.config import SERVICE_URLS, ResolvedTier, load_config, resolve_tier
+from anvil_release_qc.config import SERVICE_URLS, ResolvedTier, resolve_settings
 from anvil_release_qc.logging_setup import LOGGER_NAME, log_run_start, setup_logging
 from anvil_release_qc.safety import (
     SIGNED_URL_ALLOWED_PREFIXES,
@@ -214,15 +215,25 @@ class _RunSetup:
     creds: Credentials
     google_token: Callable[[], str]
     log_file: Path
-    identity: str  # the Sam-resolved Terra user the active credentials operate as (identity guard)
+    identity: str  # the Sam-resolved Terra user the active credentials operate as (logged)
 
 
 def _setup_run(
-    snapshot_id: str, tier_name: Optional[str], config_path: Path, log_dir: Path
+    snapshot_id: str,
+    tier_name: Optional[str],
+    config_path: Optional[Path],
+    log_dir: Path,
+    *,
+    terra_billing_project: Optional[str] = None,
+    billing_google_project_id: Optional[str] = None,
 ) -> _RunSetup:
-    """Load config, start logging, load ADC creds, and run the tier identity guard (shared by both flows)."""
-    config = load_config(config_path)
-    tier = resolve_tier(config, tier_name)
+    """Resolve settings, start logging, load ADC creds, and resolve the Terra user (shared by both flows)."""
+    tier = resolve_settings(
+        config_path,
+        tier_name,
+        terra_billing_project=terra_billing_project,
+        billing_google_project_id=billing_google_project_id,
+    )
 
     _logger, log_file = setup_logging(log_dir, tier.name, snapshot_id)
     log_run_start(
@@ -236,7 +247,7 @@ def _setup_run(
     )
 
     creds = credentials_for_tier(tier)
-    identity = assert_tier_identity(creds, tier)
+    identity = resolve_tier_identity(creds, tier)
 
     def google_token() -> str:
         return bearer_token(creds)
@@ -251,7 +262,7 @@ def _log_auth_verified(
 ) -> dict:
     """Log the ``--verify-auth`` confirmation and return its result dict (no export/import performed).
 
-    Reached only after the full auth/authorization preflight has passed: the identity guard, the
+    Reached only after the full auth/authorization preflight has passed: the Terra-user resolution, the
     snapshot read (so the operator is entitled to this snapshot), the consent gate, the BigQuery-access
     check (``check_bigquery_access``), and -- for ade-qc -- the Azul-token check. A clear, self-contained
     "you are operating as X and may run this" line for an operator who switches identities/credentials
@@ -306,7 +317,7 @@ def _create_import_and_qc(
     google_token = setup.google_token
 
     # Rawls: create the destination workspace (empty auth domain; the import applies it).
-    ws_name = workspace_name(tier.email, name, infix=infix)
+    ws_name = workspace_name(name, infix=infix)
     rawls = RawlsClient(tier.url("rawls"), google_token, timeout=RAWLS_TIMEOUT)
     workspace = make_terra_workspace(
         tier, google_token, tier.terra_billing_project, ws_name, timeout=RAWLS_TIMEOUT
@@ -401,49 +412,61 @@ def _create_import_and_qc(
 def run_ade_qc(
     snapshot_id: str,
     tier_name: Optional[str],
-    config_path: Path,
+    config_path: Optional[Path] = None,
     log_dir: Path = Path("logs"),
     dry_run: bool = False,
     catalog: Optional[str] = None,
     allow_controlled_access: bool = False,
     keep_workspace: bool = False,
-    azul_token_file: Optional[str] = None,
+    azul_token_bucket: Optional[str] = None,
     verify_auth: bool = False,
+    terra_billing_project: Optional[str] = None,
+    billing_google_project_id: Optional[str] = None,
 ) -> dict:
     """Run the ADE/Azul export/import flow for one TDR snapshot. Returns the created workspace + log path.
 
-    ``verify_auth`` is an auth/authorization preflight: it runs the identity guard, validates the Azul
+    ``verify_auth`` is an auth/authorization preflight: it resolves the Terra user, validates the Azul
     token, reads the snapshot, checks the consent gate, and verifies BigQuery access
     (``check_bigquery_access``), then logs a confirmation and returns -- **before** any export, signed
     URL, workspace, or import. ``dry_run`` (weaker) stops after Azul returns the signed URL (steps 1-3)
     -- no workspace is created and no import is run.
 
     ``allow_controlled_access`` opts in to running on non-open-access snapshots (default off = fail
-    closed, open-access only; see ``safety.assert_consent_permitted``). ``azul_token_file`` overrides
-    the tier's configured Azul token path (used by the WDL to pass a localized token file).
+    closed, open-access only; see ``safety.assert_consent_permitted``). The Azul token is read from
+    ``gs://<azul_token_bucket>/azul_token/<username>.txt`` for the Sam-resolved user running this
+    (``azul_auth.azul_token_uri``; bucket defaults to ``DEFAULT_AZUL_TOKEN_BUCKET``).
     """
-    setup = _setup_run(snapshot_id, tier_name, config_path, log_dir)
+    setup = _setup_run(
+        snapshot_id,
+        tier_name,
+        config_path,
+        log_dir,
+        terra_billing_project=terra_billing_project,
+        billing_google_project_id=billing_google_project_id,
+    )
     tier = setup.tier
     google_token = setup.google_token
 
     # Azul token: read + validate up front (fail fast before any TDR/BigQuery work). Azul rejects
-    # gcloud ADC tokens, so it needs its own interactive access token (see `azul-login`). With no
-    # token configured, Azul is called anonymously -- open-access datasets only.
-    azul_token = read_azul_token(tier, override_path=azul_token_file)
+    # gcloud ADC tokens, so it needs its own interactive access token (see `azul-login`), stored per
+    # user in GCS. With no token there, Azul is called anonymously -- open-access datasets only.
+    token_uri = azul_token_uri(setup.identity, azul_token_bucket)
+    azul_token = read_azul_token(setup.creds, token_uri)
     if azul_token is None:
         logger.info(
-            "No Azul token configured (azul_token_file unset/empty); calling Azul without a token "
-            "(open-access only). Run `anvil-release-qc azul-login` for controlled-access datasets."
+            "No Azul token at %s; calling Azul without a token (open-access only). Run "
+            "`anvil-release-qc azul-login` for controlled-access datasets.",
+            token_uri,
         )
     else:
         info = validate_azul_token(
             azul_token,
             expected_azp=expected_client_id(tier),
-            allowed_emails=tier.authorized_emails,
             min_remaining_seconds=MIN_TOKEN_SECONDS_FOR_RUN,
         )
         logger.info(
-            "Azul token OK: account %s, azp matches, expires in %ss.",
+            "Azul token OK (%s): account %s, azp matches, expires in %ss.",
+            token_uri,
             info.get("email"),
             info.get("expires_in"),
         )
@@ -475,8 +498,8 @@ def run_ade_qc(
     elif azul_token is None:
         exc = SafetyError(
             f"Snapshot {snapshot_id} is controlled-access (consentCode={consent_code!r}) but no Azul "
-            "token is available; controlled-access data requires a token (run `anvil-release-qc "
-            "azul-login` or pass --azul-token-file). Aborting before any signed URL is generated."
+            f"token at {token_uri}; controlled-access data requires a token (run `anvil-release-qc "
+            "azul-login`). Aborting before any signed URL is generated."
         )
         logger.error("%s", exc)
         raise exc
@@ -581,12 +604,14 @@ def run_ade_qc(
 def run_tdr_qc(
     snapshot_id: str,
     tier_name: Optional[str],
-    config_path: Path,
+    config_path: Optional[Path] = None,
     log_dir: Path = Path("logs"),
     dry_run: bool = False,
     allow_controlled_access: bool = False,
     keep_workspace: bool = False,
     verify_auth: bool = False,
+    terra_billing_project: Optional[str] = None,
+    billing_google_project_id: Optional[str] = None,
 ) -> dict:
     """Run the TDR direct-export + QC flow for one TDR snapshot. Returns the created workspace + log path.
 
@@ -594,7 +619,7 @@ def run_tdr_qc(
     manifest.json -> Terra import (filetype ``tdrexport``) -> QC. Uses Terra/ADC tokens throughout. For
     very large datasets that fail to export via ADE/Azul.
 
-    ``verify_auth`` is an auth/authorization preflight: it runs the identity guard, reads the snapshot,
+    ``verify_auth`` is an auth/authorization preflight: it resolves the Terra user, reads the snapshot,
     checks the consent gate, and verifies BigQuery access (``check_bigquery_access``), then logs a
     confirmation and returns -- **before** any export, signed URL, workspace, or import. ``dry_run``
     (weaker) stops after the export manifest is obtained -- no
@@ -603,7 +628,14 @@ def run_tdr_qc(
     (the operator's own Terra credentials must grant access to the controlled data). See
     ``safety.assert_consent_permitted``.
     """
-    setup = _setup_run(snapshot_id, tier_name, config_path, log_dir)
+    setup = _setup_run(
+        snapshot_id,
+        tier_name,
+        config_path,
+        log_dir,
+        terra_billing_project=terra_billing_project,
+        billing_google_project_id=billing_google_project_id,
+    )
     tier = setup.tier
     google_token = setup.google_token
 

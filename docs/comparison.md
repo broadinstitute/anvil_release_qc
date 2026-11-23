@@ -16,6 +16,7 @@ Per table, comparing the TDR snapshot (read from **BigQuery**) to the AW (read f
 | **Table parity** (strict 1:1) | every non-empty TDR table has a same-named AW table, **and** every AW table has a same-named TDR table. A *missing* table (data lost) **or** an *AW-only* table both **fail**. |
 | **Row counts** | TDR row count == AW row count, per table. |
 | **Column-count sanity** | AW column count **≥** TDR non-empty column count. Columns may be *added* by Terra; none may be *dropped*. |
+| **Skipped tables** (not compared, never a failure) | `file_inventory` (never imported into the AW) and any TDR table with **more than 350,000 rows** (too large for Terra to import). Each is named in the report with a `SKIPPED — <table>: <reason>` line. |
 | **Auth domain** | the workspace's authorization domain(s) match the snapshot's (Sam) — critical for controlled-access. |
 
 Both the harmonized **`anvil_*` (Findability Subset)** tables and the **submitter's** study tables are
@@ -35,7 +36,9 @@ from the TDR snapshot's BigQuery **structural metadata** (`snapshot_data_volume`
 | `total_value_count` | Σ (rows × columns) per table |
 
 **Counted set = non-system, non-empty tables** — *the same set this comparison treats as the TDR
-baseline*, so **`total_table_count` equals the "N tables compared"** above:
+baseline* before it skips tables the import does not carry (`file_inventory` and tables over the
+350,000-row import limit — see [Normalizations](#normalizations-expected-differences-not-flagged)). So
+**`total_table_count` equals the "N tables compared"** above **plus** any skipped tables:
 - **system tables excluded** (e.g. `datarepo_row_ids` — TDR plumbing, never imported; it would roughly
   *double* the counts), and
 - **empty tables excluded** (`row_count == 0`) — Terra does not import them, so from the Data Tables'
@@ -96,6 +99,15 @@ failures:
   datasets. These (`ComparisonProfile.import_added_aw_tables`) are skipped; otherwise strict 1:1 parity
   would flag them as unexpected "AW-only" tables. The report names the two exclusion categories — TDR
   system tables vs import-added AW tables — separately, by provenance.
+- **`file_inventory` is skipped.** It is a TDR table that is never imported into the AW, so there is
+  nothing to compare (`ComparisonProfile.not_imported_tables`). The report notes it:
+  `SKIPPED — file_inventory: not imported into the AW by design, so not compared (not a failure)`.
+- **Tables over 350,000 rows are skipped.** Terra's Data Table import cannot take a table that large,
+  so any TDR table with **more than** 350,000 rows (`ComparisonProfile.max_importable_table_rows`) is
+  left out of the comparison on both sides — whether or not the AW has a table of that name — and does
+  **not** fail the QC. The report names each with its TDR row count, e.g.
+  `SKIPPED — observation: 1,204,331 rows in TDR exceeds the 350,000-row Terra import limit, so it cannot
+  be imported and was not compared (not a failure)`.
 - **Column renames/additions are tolerated by the count check.** Terra prefixes attributes with
   `pfb:`, derives the entity id as `<entitytype>_id`, adds **reference** columns from the snapshot's
   foreign keys, and surfaces file references as `drs_uri`. Column *names* are not compared in this
@@ -170,6 +182,10 @@ workspace:
 - **Cell values are not compared (deferred, T4).** No value-level comparison is done; type
   representation, DRS/file-reference forms, arrays, and null-vs-empty are not verified. **→ Spot-check
   values, and that DRS/file references resolve.**
+- **Skipped tables are not verified at all.** `file_inventory` and every table over 350,000 rows are
+  left out of the comparison (see [Normalizations](#normalizations-expected-differences-not-flagged)),
+  so a PASS says nothing about them. **→ Check the report's `SKIPPED` lines; for large tables, rely on
+  `compare-ingest` (ADSW → TDR, no import) for their row-count coverage.**
 - **Very large datasets may exceed Terra's Data Table import capacity — the AW comparison then can't run.**
   `ade-qc` / `tdr-qc` compare the AW *after* the import; if the import can't complete (see
   [Terra Data Table import ceiling](#terra-data-table-import-ceiling-observed-2026-06)), there is no

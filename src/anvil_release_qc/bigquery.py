@@ -123,8 +123,9 @@ def snapshot_data_volume(
 ) -> DataVolume:
     """Compute the snapshot's data-volume metrics from BigQuery structural metadata.
 
-    Counts span the **non-system, non-empty** tables -- the same set the QC comparison treats as the
-    TDR baseline (so ``total_table_count`` matches the comparison's "N tables compared"):
+    Counts span the **non-system, non-empty** tables -- the QC comparison's TDR baseline *before* it
+    skips tables the import does not carry (``file_inventory``, tables over the 350k-row import limit),
+    so ``total_table_count`` can exceed the comparison's "N tables compared" by those skipped tables:
 
     - **System tables excluded** via ``ignore_tables`` (e.g. ``datarepo_row_ids`` -- TDR plumbing,
       never imported, and it would roughly double the counts).

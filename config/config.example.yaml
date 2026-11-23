@@ -1,50 +1,45 @@
-# anvil-release-qc configuration — EXAMPLE / TEMPLATE.
+# anvil-release-qc OPTIONAL local configuration — EXAMPLE / TEMPLATE.
 #
-# Copy this to config/config.yaml (which is gitignored) and fill in your own values:
+# You do NOT need this file to run in prod: billing defaults to anvil-developer-work /
+# terra-ec38e08d, credentials come from your ambient `gcloud auth application-default login`, and every
+# value below can also be passed as a CLI flag. The WDLs never use a config file. (The Azul token is not
+# configured here: `azul-login` uploads it to gs://<bucket>/azul_token/<username>.txt.)
+#
+# Use it to save local conveniences. Copy it to config/config.yaml (gitignored), which is then loaded
+# automatically (or pass --config <path>):
 #     cp config/config.example.yaml config/config.yaml
 #
-# Only per-developer settings live here. The shared, non-secret service URLs are baked into the
-# package (see src/anvil_release_qc/config.py, mirroring docs/services.md), so you do not list them.
+# Precedence for each value: CLI flag > this file > built-in default. The shared, non-secret service URLs
+# are baked into the package (src/anvil_release_qc/config.py, mirroring docs/services.md).
+# Every field is optional.
 
+# Tier used when --tier is not given. (With no config file at all, the default is prod.)
 default_tier: dev
 
 tiers:
   dev:
-    # The human Terra user account for the DEV tier. Enforced at runtime by the identity guard, which
-    # resolves the active credentials to their Terra user via Sam (/api/users/v2/self) — so in a Terra
-    # workflow the runtime pet service account maps back to this human account. Use the human account
-    # in every context (local and deployment), NOT a pet service account.
-    email: you@test.firecloud.org
-    # Optional: ADDITIONAL human Terra users authorized to run this tier (multi-operator). The identity
-    # guard and the Azul-token check allow any account in {email} ∪ authorized_users; each operator
-    # signs in / mints their own Azul token as themselves.
-    # authorized_users:
-    #   - teammate@broadinstitute.org
-    # Saved ADC credentials for this tier. Create with:
-    #   gcloud auth application-default login        # signed in as the dev account
+    # Saved ADC credentials for this tier, so the tool is pinned to that account regardless of your
+    # day-to-day gcloud login. Create with:
+    #   gcloud auth application-default login        # signed in as your dev Terra account
     # then copy ~/.config/gcloud/application_default_credentials.json to this path.
-    # Omit (or set null) to use the ambient runtime identity (e.g. in a Terra workflow).
+    # Omit (or set null) to use the ambient ADC.
     adc_credentials_file: ~/.config/anvil-release-qc/adc-dev.json
+    # REQUIRED for dev (there are no dev defaults) — here or via --billing-project.
     # Terra billing project = the workspace namespace that ade-qc/tdr-qc create workspaces under.
     terra_billing_project: your-dev-billing-project
-    # Google Cloud Project ID to run/bill Google Cloud operations against -- BigQuery jobs now, and
-    # requester-pays access later. This is a REAL GCP project id: the Terra WORKSPACE Google Project ID
-    # (Terra workspace dashboard -> Cloud Information -> Google Project ID, e.g. terra-xxxxxxxx), NOT the
-    # Terra billing project above. (They coincide for some legacy billing projects, but not in general.)
+    # REQUIRED for dev — here or via --billing-google-project-id.
+    # Google Cloud Project ID that BigQuery jobs run in / are billed to. This is a REAL GCP project id:
+    # the Terra WORKSPACE Google Project ID (Terra workspace dashboard -> Cloud Information -> Google
+    # Project ID, e.g. terra-xxxxxxxx), NOT the Terra billing project above.
     billing_google_project_id: terra-xxxxxxxx
-    # Optional: the existing shared QC workspace that `qc-batch-runner` submits into (only that tool uses
-    # it; it also accepts a --qc-workspace-name CLI override). Not needed by ade-qc/tdr-qc/compare.
+    # The shared QC workspace that `qc-batch-runner` submits into (else pass --qc-workspace-name).
     # qc_workspace_name: anvil-data-qc-shared
-    # Azul access-token file (gitignored). Populate it with:  anvil-release-qc azul-login --tier dev
-    # Azul needs a token issued to its own OAuth client; a plain gcloud ADC token is rejected.
-    azul_token_file: secrets/azul-token-dev.txt
     # Optional: the Azul OAuth client id a token must carry (azp). Auto-discovered from Azul if unset.
     # azul_oauth2_client_id: "<client-id>.apps.googleusercontent.com"
 
   prod:
-    email: you@example.org
     adc_credentials_file: ~/.config/anvil-release-qc/adc-prod.json
-    terra_billing_project: your-prod-billing-project
-    billing_google_project_id: terra-xxxxxxxx
-    # qc_workspace_name: anvil-data-qc-shared   # for qc-batch-runner (optional; CLI can override)
-    azul_token_file: secrets/azul-token-prod.txt
+    # Billing defaults to anvil-developer-work / terra-ec38e08d; uncomment only to override.
+    # terra_billing_project: anvil-developer-work
+    # billing_google_project_id: terra-ec38e08d
+    qc_workspace_name: anvil-data-qc-shared   # for qc-batch-runner

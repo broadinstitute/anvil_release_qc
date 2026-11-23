@@ -5,6 +5,10 @@ docs/comparison.md):
 
 - Build the TDR baseline on **non-empty, non-ignored** tables (Terra drops empty source tables/columns
   on import, and TDR system tables are excluded by the profile).
+- **Skip** (never fail) tables the import does not carry: the profile's never-imported tables (e.g.
+  ``file_inventory``) and any TDR table with more rows than ``profile.max_importable_table_rows`` (too
+  large for Terra to import). Skipped tables are left out on both sides and named, with the reason, in
+  the report.
 - Strict 1:1: every baseline TDR table must have a same-named AW table, and every AW table must have a
   same-named baseline TDR table. A *missing* table (data lost) or an *AW-only* table both **fail**.
 - For matched tables: row counts must be equal, and the AW column count must be >= the TDR non-empty
@@ -35,6 +39,13 @@ def compare_inventories(
     ignore = profile.ignore_tables
     ref = {t: s for t, s in reference.items() if t not in ignore}
     cand = {t: s for t, s in candidate.items() if t not in ignore}
+
+    # Too large for Terra to import: skip on both sides (an AW table of that name, if any, is not judged).
+    too_large = {
+        t: s.row_count for t, s in ref.items() if s.row_count > profile.max_importable_table_rows
+    }
+    ref = {t: s for t, s in ref.items() if t not in too_large}
+    cand = {t: s for t, s in cand.items() if t not in too_large}
 
     empty_reference = sorted(t for t, s in ref.items() if s.row_count == 0)
     baseline = {t: s for t, s in ref.items() if s.row_count > 0}  # non-empty TDR tables
@@ -68,6 +79,9 @@ def compare_inventories(
         empty_reference_tables=empty_reference,
         tdr_system_tables=sorted(present & profile.tdr_system_tables),
         import_added_aw_tables=sorted(present & profile.import_added_aw_tables),
+        not_imported_tables=sorted(present & profile.not_imported_tables),
+        too_large_tables=dict(sorted(too_large.items())),
+        max_importable_table_rows=profile.max_importable_table_rows,
     )
 
 

@@ -89,15 +89,16 @@ cd anvil_release_qc
 python -m venv .venv && source .venv/bin/activate
 pip install -e .
 
-# 2. Configure your per-tier settings (config/config.yaml is gitignored)
-cp config/config.example.yaml config/config.yaml
-#    fill in, per tier: email, adc_credentials_file, terra_billing_project,
-#    billing_google_project_id (the Terra Workspace Google Project ID for BigQuery), azul_token_file
-
-# 3. Sign in to Google (serves TDR, BigQuery, Terra). The active account must match
-#    the tier's configured `email` — enforced at runtime by the identity guard.
+# 2. Sign in to Google (serves TDR, BigQuery, Terra) with your Terra account.
 gcloud auth application-default login
 ```
+
+That is enough for **prod**: billing defaults to `--billing-project anvil-developer-work` and
+`--billing-google-project-id terra-ec38e08d` (override either with the flag). For **dev**, pass both flags
+(there are no dev defaults). An **optional** gitignored `config/config.yaml` (copy
+`config/config.example.yaml`) saves per-tier local settings — a saved ADC file per tier, your Azul token
+file, the batch runner's `qc_workspace_name`, or billing overrides — and is loaded automatically when
+present (or via `--config <path>`). The WDLs never use it.
 
 Open-access datasets need nothing more. Controlled-access is enabled with the default-off
 `--allow-controlled-access` opt-in (security-team approved): `ade-qc` additionally needs an Azul token
@@ -183,7 +184,9 @@ Ingestion comparison — PASS (5 submitter tables checked, 0 failing)
 
 - the first line is the headline **PASS / FAIL**; each table is marked **`OK`** or **`XX`**,
 - **`rows A -> B`** compares the reference (left) to the candidate (right),
-- **"out of scope" / "excluded"** lines list tables intentionally not compared — see
+- **"out of scope" / "excluded" / "SKIPPED"** lines list tables intentionally not compared, with the
+  reason — `SKIPPED` covers `file_inventory` (never imported) and any table over **350,000 rows** (too
+  large for Terra to import); skipped tables never fail the QC. See
   [What it checks](#what-it-checks--and-what-it-doesnt).
 
 ## What it checks — and what it doesn't
@@ -197,7 +200,9 @@ The comparison is organized into **four tiers of increasing depth**:
 
 The release flow additionally verifies the **authorization domain**. Expected differences are
 normalized away so they don't cause false failures: empty source tables/columns Terra drops on import,
-TDR system tables (`datarepo_row_ids`), and import-added tables (the DUOS registration record).
+TDR system tables (`datarepo_row_ids`), and import-added tables (the DUOS registration record). Tables
+the import does not carry are **skipped** and noted in the report rather than failed: `file_inventory`,
+and any table with more than **350,000 rows**.
 
 Because today's checks are **count-level (T1–T2)**, equal counts do not prove the *same* rows or values
 are present — so for high-stakes datasets, **human review still matters**.
@@ -222,9 +227,11 @@ that risk:
 
 **Controlled-access** was reviewed and **approved by the Broad security team** (no restrictions — all
 AnVIL data). It's enabled by an **explicit, default-off opt-in** — `--allow-controlled-access` (CLI) /
-`allow_controlled_access` (`ade_qc.wdl`) — so the default stays fail-closed (open-access only) and every
+`allow_controlled_access` (`anvil_data_explorer_qc.wdl`) — so the default stays fail-closed (open-access only) and every
 controlled-access run is a deliberate, audit-logged choice; layers 2–4 apply regardless. Controlled
-runs also need an Azul token (the `ade_qc.wdl` `azul_token` input) — see [`wdl/README.md`](wdl/README.md).
+runs also need an Azul token, uploaded by `anvil-release-qc azul-login` to
+`gs://<azul_token_bucket>/azul_token/<username>.txt` and read from there by each run — see
+[`wdl/README.md`](wdl/README.md).
 
 → See [`src/anvil_release_qc/safety.py`](src/anvil_release_qc/safety.py) and risk **R8** in
 [`docs/risk_register.md`](docs/risk_register.md).
@@ -247,7 +254,7 @@ anvil_release_qc/
 ├── src/anvil_release_qc/        # the importable package (all logic)
 │   ├── cli.py                #   CLI entrypoint: ade-qc, tdr-qc, compare, compare-ingest, azul-login
 │   ├── config.py             #   YAML + pydantic config; tier resolution
-│   ├── auth.py, azul_auth.py #   Google ADC + identity guard; Azul token capture
+│   ├── auth.py, azul_auth.py #   Google ADC + Terra-user resolution (logged); Azul token capture
 │   ├── safety.py             #   the fail-closed safety model (consent gate, signed-URL containment, …)
 │   ├── pipeline.py           #   the wired export/import + QC flow
 │   ├── clients/              #   HTTP clients: azul, rawls (create), firecloud, sam (+ redacting base); `toolkit.py` runs pyops-service-toolkit's TDR/TerraWorkspace under the same token pinning + redaction
@@ -255,7 +262,7 @@ anvil_release_qc/
 ├── wdl/                      # Terra/WDL wrappers + deploy guide (README.md)
 ├── docs/                     # architecture, service registry, flows, comparison, risks
 ├── scripts/                  # git-secrets setup, HAR scrubbing
-├── config/                   # config.example.yaml (copy to the gitignored config.yaml)
+├── config/                   # config.example.yaml (optional local settings; copy to gitignored config.yaml)
 ├── Dockerfile                # code-only image for batch / WDL runs
 └── CLAUDE.md                 # architecture & design context (maintainers)
 ```

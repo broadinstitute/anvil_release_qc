@@ -388,7 +388,6 @@ def test_make_tdr_and_workspace_hosts_match_tier_config():
     for name in SERVICE_URLS:
         tier = ResolvedTier(
             name=name,
-            email="a@b.c",
             adc_credentials_file=None,
             azul_token_file=None,
             terra_billing_project="bp",

@@ -4,10 +4,10 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Current state
 
-`anvil-release-qc` is **built and in production use** (deployed image `:0.3.4`; repo now at `0.3.5`,
+`anvil-release-qc` is **built and in production use** (deployed image `:0.3.5`; repo now at `0.3.6`,
 pending publish). The package
-`src/anvil_release_qc/` provides: `config` (YAML + pydantic, tier resolution), `auth` (ADC per tier +
-Sam-resolved identity guard), `azul_auth` (Azul token capture/validation), `logging_setup` + `redaction`
+`src/anvil_release_qc/` provides: `config` (tier resolution: CLI flags > optional local YAML > built-in
+prod billing defaults), `auth` (ADC per tier + Sam-resolved Terra user, logged), `azul_auth` (Azul token capture/validation), `logging_setup` + `redaction`
 (structured, secret-redacted request/response logging), `timing` (per-stage durations), `clients/` (base
 + `tdr`, `azul`, `rawls`, `firecloud`, `sam`), `bigquery` (Azul `dataset_id` resolution + snapshot
 **data-volume metrics**), `workspace` (naming), `compare/` (the comparison seams: `sources`, `profile`,
@@ -28,13 +28,15 @@ Sam-resolved identity guard), `azul_auth` (Azul token capture/validation), `logg
 
 The two export flows share `pipeline._create_import_and_qc` (the import+QC tail). **QC** = AW-vs-snapshot
 table comparison (T1–T2: table parity, row counts, column-count sanity) + auth-domain verification.
+Tables the import does not carry are **skipped, never failed**, and noted in the report: `file_inventory`
+and any TDR table with **> 350,000 rows** (Terra's import limit) — see `compare/profile.py`.
 
 **Cross-cutting capabilities:**
 - **Controlled-access** via the default-off `--allow-controlled-access` opt-in on both `ade-qc` and
   `tdr-qc` (Broad security-team approved 2026-06 — no restrictions, all AnVIL data). `ade-qc` also needs
   an Azul token; `tdr-qc` needs none (the operator's own Terra creds must grant the access). See
   `safety.py` and risk **R8**; keep the opt-in **default-off** and do not weaken layers 2–4.
-- **`--verify-auth`** — a fast, side-effect-free preflight (identity guard → Azul token (ade) →
+- **`--verify-auth`** — a fast, side-effect-free preflight (Terra-user resolution → Azul token (ade) →
   retrieveSnapshot → consent gate → exit **before** any export/signed URL).
 - **Azul reindexing preflight** (`ade-qc`; v0.3.5) — before the export, `azul_auth.assert_azul_not_reindexing`
   reads Azul's `/health/progress`; any non-zero unindexed backlog (a catalog (re)index in progress) **fails
@@ -51,7 +53,7 @@ table comparison (T1–T2: table parity, row counts, column-count sanity) + auth
   access / cleanup.
 
 For deployment, a code-only **Docker image** (`Dockerfile`) plus four **womtool-validated WDL** wrappers
-(`wdl/{ade_qc,tdr_qc,compare,compare_ingest}.wdl`) run the same CLI non-interactively in Terra. Each WDL
+(`wdl/{anvil_data_explorer_qc,tdr_qc,compare,compare_ingest}.wdl`) run the same CLI non-interactively in Terra. Each WDL
 has two committed config sets — a safe `*.inputs.example.json` and the portable **production**
 `*.inputs.json` + `*.outputs.json` (secrets abstracted to Terra Workspace Data). See
 [`wdl/README.md`](wdl/README.md).
@@ -65,7 +67,8 @@ has two committed config sets — a safe `*.inputs.example.json` and the portabl
   (2026-06-26, the `ANVIL_ccdg_asc_ndd_daly_talkowski_cdcseed_asd_…` snapshot → QC PASS, auth-domain
   match — the first exercise of the auth-domain check against a non-empty domain), and `tdr-qc` in
   **prod** (2026-06-27, the `ANVIL_dGTEx_GRU_v1` GRU snapshot → QC PASS, `AUTH_AnVIL_dGTEx_GRU_v1` on
-  both sides). Proved out the Sam-resolved identity guard and the multi-user `authorized_users` allowlist.
+  both sides). (The config-file `email` / `authorized_users` allowlist used then has since been removed —
+access is enforced by Terra/TDR/Azul permissions; the tool logs the Sam-resolved user.)
 - ✅ **Prod batch** run: the open-access anvil14 snapshots via `ade-qc`, and 8 large clinical/EHR datasets
   via `tdr-qc`.
 - ⚠️ **Terra Data Table import ceiling discovered:** the largest clinical/EHR dataset (17 tables /
@@ -76,10 +79,18 @@ has two committed config sets — a safe `*.inputs.example.json` and the portabl
   [`docs/comparison.md`](docs/comparison.md).
 - ⏭️ **Deferred QC depth** (see [`docs/comparison.md`](docs/comparison.md)): full column-name
   comparison, T3 id-set parity, T4 cell-value comparison.
-- 🆕 **v0.3.5 (this release, pending publish):** the Azul **reindexing preflight** (guards `ade-qc`
-  against QC'ing an empty/incomplete manifest during a UCSC catalog reindex); **run timestamps** and the
-  **created-workspace** namespace/name as WDL outputs / data-table columns (both described above). Bundled
-  into one image publish.
+- ✅ **v0.3.5 (published 2026-11-20):** the Azul **reindexing preflight** (guards `ade-qc` against
+  QC'ing an empty/incomplete manifest during a UCSC catalog reindex); **run timestamps** and the
+  **created-workspace** namespace/name as WDL outputs / data-table columns (both described above).
+- 🆕 **v0.3.6 (this release, pending publish):** image moved to the `operations-portal-427515` registry;
+  `ade_qc.wdl` renamed **`anvil_data_explorer_qc.wdl`** (workflow `AnvilDataExplorerQc`); QC **skips**
+  `file_inventory` and tables over **350,000 rows** (noted in the report, never a failure); workspace names
+  start with **`ops-validation-`** (no operator username); the WDLs take **no config file** (optional
+  `billing_project` / `billing_google_project_id` inputs, prod defaults) and the `email` /
+  `authorized_users` allowlist is removed; the Azul token is no longer an input — each run reads the
+  running user's token from `gs://<azul_token_bucket>/azul_token/<username>.txt` (bucket input, default
+  `fc-secure-886bea29-…`), which `azul-login` uploads. Terra method configs must be re-imported after
+  publishing.
 
 Environment: Python **3.13.14** (pyenv; pinned in `.python-version`), local `.venv`, deps from
 `pyproject.toml` with pinned `requirements.txt` / `requirements-dev.txt` (pip-tools). See the README
@@ -159,9 +170,9 @@ value — including empty/unknown — is blocked **fail-closed, before any PFB s
 controlled-access signed URL grants direct access to an NIH study's controlled data; mishandling it is a
 Federal DMI. **Controlled-access was reviewed and approved by the Broad security team (2026-06, no
 restrictions — all AnVIL data)** and is enabled by an **explicit, default-off opt-in**:
-`allow_controlled_access` (the `--allow-controlled-access` CLI flag / `ade_qc.wdl` input; see
+`allow_controlled_access` (the `--allow-controlled-access` CLI flag / `anvil_data_explorer_qc.wdl` input; see
 `safety.assert_consent_permitted`), which permits any `consentCode` and emits an audit `WARNING`.
-Controlled runs also require an Azul token (`ade_qc.wdl` `azul_token` input). The other three safety layers
+Controlled runs also require an Azul token (read from `gs://<azul_token_bucket>/azul_token/<username>.txt`). The other three safety layers
 (SignedUrl containment, hand-off verification, bearer-pinning) apply on every run. See
 [`src/anvil_release_qc/safety.py`](src/anvil_release_qc/safety.py) and risk **R8**. Keep the opt-in
 **default-off**, and do not weaken layers 2–4.
@@ -196,9 +207,8 @@ flow itself is specified in [`docs/export_import_flow.md`](docs/export_import_fl
   path in all three.
 
 **Auth** (see *Two tiers*):
-- Google **ADC** everywhere; **one or more authorized human Terra users per tier** (the tier `email`
-  plus optional `authorized_users` — multi-operator), both tiers identical (in a Terra workflow the
-  runtime **pet service account** resolves to its human user via Sam — see the identity guard).
+- Google **ADC** everywhere; any Terra user may run the tool — **no allowlist** (in a Terra workflow the
+  runtime **pet service account** resolves to its human user via Sam, which is logged).
 - Locally, a per-tier saved ADC file selected via `GOOGLE_APPLICATION_CREDENTIALS`; in deployment,
   ADC falls back to the ambient runtime identity (no code change).
 - The gcloud ADC creds serve **TDR, BigQuery, and Terra** (Rawls/Firecloud): one
@@ -206,30 +216,40 @@ flow itself is specified in [`docs/export_import_flow.md`](docs/export_import_fl
   long ops survive the ~1 h expiry.
 - **Azul needs its own token** — it rejects the gcloud ADC token (requires `azp` == Azul's OAuth
   client). Capture one interactively with `anvil-release-qc azul-login` (validated via Google `tokeninfo`,
-  stored per tier in `azul_token_file`); no token ⇒ anonymous (open-access only). See
+  then **uploaded** to `gs://<azul_token_bucket>/azul_token/<username>.txt`, `<username>` = the
+  Sam-resolved Terra email before the `@`; bucket default `fc-secure-886bea29-8c4e-4568-920a-a8cfee18e659`,
+  `azul_token_bucket` WDL input / `--azul-token-bucket`). Every `ade-qc` run — local or a Terra workflow
+  (the pet SA resolves to its owner) — reads the running user's file; the batch runner checks the same
+  file. No token there ⇒ anonymous (open-access only); unreadable / near-expiry ⇒ exit 2. See
   [`export_import_flow.md`](docs/export_import_flow.md) → Authentication and risk **R7**.
-- **Identity guard:** before any API call, resolve the active credentials to their **canonical Terra
-  user** via Sam (`/api/users/v2/self`, which maps a Terra **pet service account** to its owning human
-  user) and assert it is in the tier's **authorized set** (`email` ∪ `authorized_users`, supporting
-  multiple operators); abort otherwise. So the configured accounts are **human Terra users** in every
-  context (local *and* the Terra/WDL deployment, where the runtime identity is the pet SA) — the raw ADC
-  identity is logged for the audit trail. The Azul-token check uses the same authorized set.
+- **Terra-user resolution** (`auth.resolve_tier_identity`): before any API call, resolve the active
+  credentials to their **canonical Terra user** via Sam (`/api/users/v2/self`, which maps a Terra **pet
+  service account** to its owning human user) and **log** it with the raw ADC identity for the audit
+  trail. It fails fast if Sam can't resolve the credentials (not a Terra user on this tier), but there is
+  **no allowlist** — who may read data or create workspaces is enforced by Terra/TDR/Azul permissions.
+  The Azul-token check validates `azp` + expiry and logs the token's owner; it doesn't restrict the account.
 - Scopes: plain `gcloud auth application-default login` (defaults `openid`, `email`,
   `cloud-platform`) — no custom scope string.
 
-**Config (YAML):** per-tier `{email, ADC file path, terra_billing_project, billing_google_project_id,
-azul_token_file}` plus the shared service URLs (from [`services.md`](docs/services.md)). Committed
-non-secret `config.example.yaml` + **gitignored** per-developer `config.yaml`. **Two distinct project
-values** (they coincided only for some legacy billing projects, so keep them separate): `terra_billing_project`
+**Settings (no config file required):** the shared service URLs are baked in (from
+[`services.md`](docs/services.md)); the two billing values come from `--billing-project` /
+`--billing-google-project-id` (the WDLs' optional `billing_project` / `billing_google_project_id` inputs),
+defaulting in **prod** to `anvil-developer-work` / `terra-ec38e08d` (`config.DEFAULT_BILLING`; **dev has no
+defaults**, so a dev run never borrows prod billing). The WDLs take **no config file**. An **optional,
+gitignored** local `config/config.yaml` (template `config.example.yaml`; auto-loaded when present, or
+`--config`) holds per-tier local conveniences — `adc_credentials_file`,
+`qc_workspace_name` (batch runner), billing overrides. Precedence: flag > local config > built-in default.
+**Two distinct project values** (they coincided only for some legacy billing projects, so keep them separate): `terra_billing_project`
 = the Terra billing project (a.k.a. workspace namespace) that ade-qc/tdr-qc create workspaces under;
 `billing_google_project_id` = a **real Google Cloud Project ID** (the Terra Workspace Google Project ID,
 e.g. `terra-xxxxxxxx`) that **BigQuery jobs run in / are billed to** (and requester-pays later) — *not* the
 Terra billing project. `check_bigquery_access` preflights it (also in `--verify-auth`).
 
 **Workspace creation:** one workspace **per run** — **deleted automatically when the QC reports no validation errors**, and **retained as-is** otherwise (a QC failure, or a failed/timed-out import, for investigation); the default-false `--keep-workspace` flag (`keep_workspace` WDL input) keeps it even after a pass. Name =
-`<user-local-part>_<infix>_<sanitized full snapshot name>_YYYYMMDDHHMM` (run start time,
-**minute-granular**), sanitizing any non-`[A-Za-z0-9_-]` run to a single `_`. The leading `qc`
-segment makes these workspaces easy to identify/group/delete (they accumulate — R4); the infix also
+`ops-validation-<infix>_<sanitized full snapshot name>_YYYYMMDDHHMM` (run start time,
+**minute-granular**), sanitizing any non-`[A-Za-z0-9_-]` run to a single `_`. The fixed leading
+`ops-validation-` prefix (`workspace.WORKSPACE_NAME_PREFIX`; deliberately **not** the operator's
+username) makes these workspaces easy to identify/group/delete (they accumulate — R4); the infix
 names the **export flow**: `qc_anvil_ade` (`ade-qc`; `ade` = AnVIL Data Explorer, the public name,
 preferred over the backend service name `azul`) or `qc_anvil_tdr` (`tdr-qc`). The infix may evolve and
 is a parameter of `workspace.workspace_name` (`ADE_NAME_INFIX` / `TDR_NAME_INFIX`). Minute granularity
