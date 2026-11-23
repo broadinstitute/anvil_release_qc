@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "anvil-release-qc"
-version = "0.3.6"
+version = "0.3.7"
 description = "Processes and tools for AnVIL Data Release quality control"
 readme = "README.md"
 requires-python = ">=3.13"
@@ -16,7 +16,7 @@ dependencies = [
     "requests>=2.31",
     "google-auth>=2.30",
     "google-cloud-bigquery>=3.20",
-    "pyops-service-toolkit @ git+https://github.com/broadinstitute/pyops-service-toolkit.git@v12.23.0#egg=pyops-service-toolkit",
+    "pyops-service-toolkit @ git+https://github.com/broadinstitute/pyops-service-toolkit.git@v12.23.1#egg=pyops-service-toolkit",
 ]
 
 [project.optional-dependencies]

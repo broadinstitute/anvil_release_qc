@@ -26,7 +26,7 @@ workflow AnvilDataExplorerQc {
         Boolean allow_controlled_access = false
         Boolean keep_workspace = false
         String azul_token_bucket = "fc-secure-886bea29-8c4e-4568-920a-a8cfee18e659"
-        String docker = "us-central1-docker.pkg.dev/operations-portal-427515/anvil-qc/anvil-release-qc:0.3.6"
+        String docker = "us-central1-docker.pkg.dev/operations-portal-427515/anvil-qc/anvil-release-qc:0.3.7"
     }
 
     call anvil_data_explorer_qc {
