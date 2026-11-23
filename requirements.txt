@@ -66,7 +66,7 @@ pydantic==2.13.4
 pydantic-core==2.46.4
 pygments==2.20.0
 pyjwt==2.15.1
-pyops-service-toolkit @ git+https://github.com/broadinstitute/pyops-service-toolkit.git@476c00d
+pyops-service-toolkit @ git+https://github.com/broadinstitute/pyops-service-toolkit.git@8af7f03
 pyparsing==3.3.3
 python-dateutil==2.9.0.post0
 pytz==2026.6

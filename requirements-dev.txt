@@ -258,7 +258,7 @@ pyjwt==2.15.1
     # via
     #   msal
     #   pyjwt
-pyops-service-toolkit @ git+https://github.com/broadinstitute/pyops-service-toolkit.git@476c00d
+pyops-service-toolkit @ git+https://github.com/broadinstitute/pyops-service-toolkit.git@8af7f03
     # via anvil-release-qc (pyproject.toml)
 pyparsing==3.3.3
     # via httplib2
